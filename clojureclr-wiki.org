@@ -1,0 +1,858 @@
+#+TITLE: ClojureCLR Wiki 学习笔记
+#+AUTHOR: ClojureCLR 学习者
+#+DESCRIPTION: 根据 ClojureCLR Wiki 整理的学习文档，可在 CIDER 中逐项测试
+
+* 简介
+
+ClojureCLR 是 Clojure 的 .NET 原生实现。
+
+** 支持的 .NET 版本
+
+- .NET Framework 4.6.1 及更高版本
+- .NET Core 3.1
+- .NET 5.0
+
+** 库目标
+
+- .NET Standard 2.0
+- .NET Standard 2.1
+
+** 相关资源
+
+- ClojureCLR Google 组: 专门讨论 ClojureCLR 的问题、评论和建议
+- Gitter CLR 聊天室: 另一个讨论论坛
+- 常规 Clojure 文档: https://clojure.org
+
+* 基础 CLR 互操作 (Basic CLR Interop)
+
+ClojureCLR 支持 clojure.org/java_interop 中提到的所有基础互操作函数。
+
+** 成员访问
+
+#+BEGIN_SRC clojure
+  ;; 导入 System.String 类
+  (import 'System.String)
+
+  ;; 实例成员访问 - 调用实例方法
+  (def s "Hello World")
+  (.ToUpper s)
+  ;; => "HELLO WORLD"
+
+  (.Substring s 0 5)
+  ;; => "Hello"
+
+  ;; 静态成员访问 - 调用静态方法
+  (String/Concat "Hello" " " "ClojureCLR")
+  ;; => "Hello ClojureCLR"
+
+  ;; 访问静态字段
+  String/Empty
+  ;; => ""
+#+END_SRC
+
+** Dot 特殊形式
+
+#+BEGIN_SRC clojure
+  ;; 基础形式 - 访问实例属性/字段
+  (. s Length)
+  ;; => 11
+
+  ;; 带参数的方法调用 - 两种写法
+  (. s (Substring 0 5))
+  ;; => "Hello"
+
+  (. s Substring 0 5)
+  ;; => "Hello"
+
+  ;; 链式调用
+  (.. s (Substring 0 5) ToUpper)
+  ;; => "HELLO"
+#+END_SRC
+
+** 实例化
+
+#+BEGIN_SRC clojure
+  ;; 创建 StringBuilder 实例
+  (import 'System.Text.StringBuilder)
+
+  ;; 两种方式等价
+  (def sb1 (StringBuilder. "Initial"))
+  (def sb2 (new StringBuilder "Initial"))
+
+  (. sb1 ToString)
+  ;; => "Initial"
+
+  ;; 追加内容
+  (.Append sb1 " Text")
+  (. sb1 ToString)
+  ;; => "Initial Text"
+#+END_SRC
+
+** 赋值操作
+
+#+BEGIN_SRC clojure
+  ;; 导入一个有可设置字段的类
+  (import 'System.Collections.ArrayList)
+
+  (def al (ArrayList. [1 2 3]))
+
+  ;; 注意：StringBuilder 的 Capacity 属性可以设置
+  (import 'System.Text.StringBuilder)
+  (def sb (StringBuilder.))
+
+  ;; 设置属性值
+  ;; 注意：ClojureCLR 中数字默认是 Int64，需要显式转换为 Int32
+  (set! (. sb Capacity) (int 100))
+  (. sb Capacity)
+  ;; => 100
+#+END_SRC
+
+** 其他实用函数
+
+#+BEGIN_SRC clojure
+  ;; doto - 对同一对象执行多个操作
+  (doto (StringBuilder.)
+    (.Append "Hello")
+    (.Append " ")
+    (.Append "World")
+    (.ToString))
+  ;; => "Hello World"
+
+  ;; instance? - 类型检查
+  (instance? String "test")
+  ;; => true
+
+  (instance? Int32 42)
+  ;; => false
+
+  (instance? Int64 42)
+  ;; => true
+
+  ;; memfn - 将方法转换为函数
+  (def get-length (memfn get_Length))
+  (get-length "hello")
+  ;; => 5
+
+  ;; 注意：在 CLR 中属性作为方法访问，Length 是属性
+  ;; 使用匿名函数更常见
+  (map #(.Length %) ["a" "bb" "ccc"])
+  ;; => (1 2 3)
+#+END_SRC
+
+** 嵌套类命名规则
+
+⚠️ 重要：在 CLR 中，嵌套类的名称使用 + 与包含类分隔，而不是 JVM 使用的 $。
+
+#+BEGIN_SRC clojure
+  ;; 例如 Dictionary 的 Enumerator 是嵌套类
+  ;; 开放式泛型类型需要用 |...| 包裹
+  (import '|System.Collections.Generic.Dictionary`2|)
+
+  ;; 访问嵌套类需要使用 +
+  ;; |System.Collections.Generic.Dictionary`2+Enumerator|
+#+END_SRC
+
+* 枚举类型操作 (Working with Enums)
+
+在 ClojureCLR 中处理枚举类型非常直观。
+
+** 导入和使用枚举
+
+#+BEGIN_SRC clojure
+  ;; 导入文件打开模式枚举
+  (import 'System.IO.FileMode)
+
+  ;; 访问枚举值
+  FileMode/CreateNew
+  ;; => CreateNew
+
+  ;; 枚举值保持其类型
+  (class FileMode/CreateNew)
+  ;; => System.IO.FileMode
+#+END_SRC
+
+** 枚举值与整数的转换
+
+#+BEGIN_SRC clojure
+  ;; 枚举转整数
+  (int FileMode/CreateNew)
+  ;; => 1
+
+  (int FileMode/Open)
+  ;; => 3
+
+  ;; 整数转枚举
+  (Enum/ToObject FileMode 4)
+  ;; => OpenOrCreate
+#+END_SRC
+
+** 使用 enum-val 函数
+
+通过名称获取枚举值（支持字符串或关键字）：
+
+#+BEGIN_SRC clojure
+  ;; 使用字符串
+  (enum-val FileMode "CreateNew")
+  ;; => CreateNew
+
+  ;; 使用关键字
+  (enum-val FileMode :Open)
+  ;; => Open
+
+  ;; 适用于任何类型
+  (enum-val System.DayOfWeek :Monday)
+  ;; => Monday
+#+END_SRC
+
+** Flags 枚举操作
+
+带有 Flags 特性的枚举常用于表示位域。
+
+#+BEGIN_SRC clojure
+  ;; 导入 FileShare 枚举（带有 Flags 特性）
+  (import 'System.IO.FileShare)
+
+  ;; 查看各个值
+  FileShare/None
+  ;; => None
+
+  FileShare/Read
+  ;; => Read
+
+  FileShare/Write
+  ;; => Write
+
+  ;; 使用 enum-or 组合值
+  (enum-or FileShare/Read FileShare/Write)
+  ;; => ReadWrite
+
+  ;; 组合更多值
+  (def share-mode (enum-or FileShare/Read FileShare/Write FileShare/Inheritable))
+  share-mode
+  ;; => Read, Write, Inheritable
+#+END_SRC
+
+*** 掩码操作 (enum-and)
+
+#+BEGIN_SRC clojure
+  ;; 定义一个组合值
+  (def r (enum-or FileShare/ReadWrite FileShare/Inheritable))
+
+  ;; 使用 enum-and 检查位
+  (= (enum-and r FileShare/Write) FileShare/Write)
+  ;; => true
+
+  ;; 检查是否包含 Delete
+  (= (enum-and r FileShare/Delete) FileShare/None)
+  ;; => true (因为没有设置 Delete 位)
+
+  ;; 检查是否包含 Read
+  (= (enum-and r FileShare/Read) FileShare/Read)
+  ;; => true
+#+END_SRC
+
+*** 使用 HasFlag 方法
+
+#+BEGIN_SRC clojure
+  ;; 使用 .HasFlag 方法测试
+  (.HasFlag r FileShare/Write)
+  ;; => true
+
+  (.HasFlag r FileShare/Delete)
+  ;; => false
+
+  ;; 组合检查
+  (.HasFlag r FileShare/ReadWrite)
+  ;; => true
+#+END_SRC
+
+** 另一个 Flags 枚举例子：BindingFlags
+
+#+BEGIN_SRC clojure
+  ;; 反射中常用的 BindingFlags
+  (import 'System.Reflection.BindingFlags)
+
+  ;; 组合多个标志
+  (def flags (enum-or BindingFlags/Public BindingFlags/Instance))
+  flags
+  ;; => Instance, Public
+
+  ;; 用于获取类型的成员
+  (def t (type "hello"))
+  (.GetFields t flags)
+  ;; => 获取所有公共实例字段
+#+END_SRC
+
+* 加载程序集 (Loading Assemblies)
+
+ClojureCLR 提供了几个函数来加载程序集。
+
+** assembly-load
+
+根据程序集名称从 GAC 或当前目录加载程序集（从 1.3 版本开始提供）。
+
+#+BEGIN_SRC clojure
+  ;; 加载 System.Xml 程序集
+  (assembly-load "System.Xml")
+
+  ;; 加载后可以使用其中的类型
+  (import 'System.Xml.XmlDocument)
+  (def xml-doc (XmlDocument.))
+  ;; => #'clojure.core/xml-doc
+#+END_SRC
+
+** assembly-load-from
+
+根据路径加载程序集（从 1.3 版本开始提供）。
+
+#+BEGIN_SRC clojure
+;; 假设有一个 DLL 在当前目录
+;; (assembly-load-from "MyLibrary.dll")
+
+;; 加载 Newtonsoft.Json（如果存在）
+;; (assembly-load-from "Newtonsoft.Json.dll")
+#+END_SRC
+
+** assembly-load-file
+
+从文件路径加载程序集。
+
+#+BEGIN_SRC clojure
+;; 使用绝对路径或相对路径
+;; (assembly-load-file "/path/to/MyAssembly.dll")
+;; (assembly-load-file "lib/MyAssembly.dll")
+#+END_SRC
+
+** assembly-load-with-partial-name
+
+根据部分名称加载程序集（从 1.4 版本开始提供）。
+
+#+BEGIN_SRC clojure
+;; 使用部分名称加载
+;; (assembly-load-with-partial-name "System.Data")
+
+;; 这会加载找到的最新版本
+#+END_SRC
+
+** 完整示例：加载并使用外部程序集
+
+#+BEGIN_SRC clojure
+  ;; 示例：假设我们要使用 System.Data
+  (assembly-load "System.Data")
+
+  ;; 导入常用的数据类
+  (import '[System.Data DataTable DataColumn DataRow])
+
+  ;; 创建数据表
+  (def table (DataTable. "People"))
+
+  ;; 添加列 - DataColumn 构造函数需要 System.Type 类型参数
+  ;; 使用 type 函数获取类型的 Type 对象
+  ;; 使用 .. 宏进行级联成员访问
+  (.. table Columns (Add (DataColumn. "Name" (type ""))))
+  (.. table Columns (Add (DataColumn. "Age" (type 0))))
+
+  ;; 或者分开写更清晰
+  ;(.Add (.Columns table) (DataColumn. "Gender" (type "")))
+
+  ;; 添加行
+  (def row (.NewRow table))
+  (.set_Item row "Name" "Alice")
+  (.set_Item row "Age" 30)
+  (.. table Rows (Add row))
+
+  ;; 查看结果
+  (.Count (.Rows table))
+  ;; => 1
+
+  ;; 正确语法：Rows 是属性，需要用 get_Item 获取行和列
+  (.. table Rows (get_Item 0) (get_Item "Name"))
+  ;; => "Alice"
+  
+  ;; 或者分开写
+  (.get_Item (.get_Item (.Rows table) 0) "Name")
+  ;; => "Alice"
+
+  ;; 使用 .. 宏链式调用
+  (.. table Rows (get_Item 0) (get_Item "Name"))
+
+  ;; 或者分开写更清晰
+  (.get_Item (.get_Item (.Rows table) 0) "Name")
+
+#+END_SRC
+
+* 指定类型 (Specifying Types)
+
+** 类型提示扩展
+
+标准 Clojure 允许使用 int、double、float 等符号作为类型提示来引用基本类型。ClojureCLR 扩展了这一点，支持 CLR 中特有的数值类型：
+
+#+BEGIN_SRC clojure
+  ;; CLR 特有的数值类型提示
+  ;; 注意：ClojureCLR 支持 uint/ulong 等扩展类型，但类型提示可能需要完全限定
+  (defn process-uint [^System.UInt32 x]
+    (bit-or x 0xFF))
+
+  (defn process-ulong [^System.UInt64 x]
+    (+ x 100))
+
+  ;; 测试
+  (process-uint (uint 100))
+  ;; => 255
+
+  (process-ulong (ulong 1000))
+  ;; => 1100
+
+  ;; 数组类型简写 - uints 创建 UInt32 数组
+  (defn process-uint-array [arr]
+    (alength arr))
+
+  ;; 创建 uint 数组
+  (def uint-arr (uints 1 2 3 4 5))
+  (process-uint-array uint-arr)
+  ;; => 5
+#+END_SRC
+
+** 垂直线引用 (|-quoting)
+
+ClojureCLR 通过垂直线引用机制扩展了符号的读取器语法，用于处理包含特殊字符的 CLR 类型名。
+
+#+BEGIN_SRC clojure
+;; 引用泛型类型的完整示例
+;; System.Collections.Generic.List<int>
+;; 开放式泛型类型导入需要用 |...| 包裹反引号
+(import '|System.Collections.Generic.List`1|)
+
+;; 创建泛型 List 实例 - 指定具体类型参数
+(def int-list (|System.Collections.Generic.List`1[System.Int32]|.))
+
+;; 添加元素
+(.Add int-list 10)
+(.Add int-list 20)
+(.Add int-list 30)
+
+;; 转换为序列
+(seq int-list)
+;; => (10 20 30)
+
+;; 获取 Count 属性
+(. int-list Count)
+;; => 3
+#+END_SRC
+
+** 泛型类型引用详解
+
+#+BEGIN_SRC clojure
+;; 引用不同参数数量的泛型类型
+;; Dictionary<TKey, TValue>
+(import '|System.Collections.Generic.Dictionary`2|)
+
+;; 指定具体类型参数
+(def dict (|System.Collections.Generic.Dictionary`2[System.String,System.Int32]|.))
+
+;; 使用字典
+(.Add dict "one" 1)
+(.Add dict "two" 2)
+(.Add dict "three" 3)
+
+;; 访问元素
+(. dict Item "two")
+;; => 2
+
+;; 获取键和值
+(seq (.Keys dict))
+;; => ("one" "two" "three")
+
+(seq (.Values dict))
+;; => (1 2 3)
+#+END_SRC
+
+** 在函数中使用泛型类型
+
+#+BEGIN_SRC clojure
+;; 定义一个处理泛型列表的函数
+(defn sum-list [^|System.Collections.Generic.IList`1[System.Int32]| lst]
+  (reduce + (seq lst)))
+
+;; 测试
+(def numbers (|System.Collections.Generic.List`1[System.Int32]|.))
+(doseq [n [1 2 3 4 5]]
+  (.Add numbers n))
+
+(sum-list numbers)
+;; => 15
+#+END_SRC
+
+* 调用泛型方法 (Calling Generic Methods)
+
+** 自动类型推断
+
+ClojureCLR 支持泛型方法的自动类型推断。
+
+#+BEGIN_SRC clojure
+;; 导入 System.Linq
+(assembly-load "System.Core")  ; System.Linq 在这个程序集中
+(import 'System.Linq.Enumerable)
+
+;; 使用 Where 方法 - 类型自动推断
+(def numbers [1 2 3 4 5 6 7 8 9 10])
+(def evens (Enumerable/Where numbers even?))
+(seq evens)
+;; => (2 4 6 8 10)
+
+;; 使用 Select 进行映射
+(def doubled (Enumerable/Select numbers #(* % 2)))
+(seq doubled)
+;; => (2 4 6 8 10 12 14 16 18 20)
+
+;; 获取前5个元素
+(def first5 (Enumerable/Take numbers 5))
+(seq first5)
+;; => (1 2 3 4 5)
+#+END_SRC
+
+** 处理歧义重载
+
+当类型推断无法确定时，会出现错误：
+
+#+BEGIN_SRC clojure
+;; 定义一个支持多个参数数量的函数
+(defn flexible-fn
+  ([x] (inc x))
+  ([x y] (+ x y)))
+
+;; 以下会因歧义而失败
+;; (Enumerable/Where [1 2 3 4 5] flexible-fn)
+;; => ArgumentTypeException
+#+END_SRC
+
+** 解决方案 1：使用匿名函数
+
+#+BEGIN_SRC clojure
+;; 通过匿名函数明确参数数量
+(def filtered (Enumerable/Where [1 2 3 4 5] #(flexible-fn %)))
+(seq filtered)
+;; => (2 3 4 5 6)
+#+END_SRC
+
+** 解决方案 2：使用 sys-func 和 sys-action
+
+#+BEGIN_SRC clojure
+;; 使用 sys-func 显式声明委托类型
+(def filtered2 (Enumerable/Where [1 2 3 4 5]
+                 (sys-func [Object Boolean] [x] (even? x))))
+(seq filtered2)
+;; => (2 4)
+
+;; Range 示例
+(def range-nums (Enumerable/Range 1 10))
+(seq range-nums)
+;; => (1 2 3 4 5 6 7 8 9 10)
+
+;; 显式指定 Int32 类型
+(def evens2 (Enumerable/Where range-nums
+               (sys-func [Int32 Boolean] [x] (even? x))))
+(seq evens2)
+;; => (2 4 6 8 10)
+#+END_SRC
+
+** 使用 type-args 显式指定类型参数
+
+某些情况下需要显式提供类型参数：
+
+#+BEGIN_SRC clojure
+;; Repeat 方法需要显式类型参数
+;; (def repeated (Enumerable/Repeat 2 5))
+;; => 会失败
+
+;; 使用 type-args 提供类型参数
+(def repeated (Enumerable/Repeat (type-args Int32) 2 5))
+(seq repeated)
+;; => (2 2 2 2 2)
+
+;; 另一个例子：OfType 用于筛选特定类型
+(def mixed-objects (into-array Object [1 "hello" 2 "world" 3.14]))
+(def strings (Enumerable/OfType (type-args String) mixed-objects))
+(seq strings)
+;; => ("hello" "world")
+#+END_SRC
+
+** 更多 Linq 方法示例
+
+#+BEGIN_SRC clojure
+;; 聚合操作
+(def numbers (into-array Int32 [1 2 3 4 5]))
+
+;; 求和
+(Enumerable/Sum numbers)
+;; => 15
+
+;; 平均值
+(Enumerable/Average numbers)
+;; => 3.0
+
+;; 最大值
+(Enumerable/Max numbers)
+;; => 5
+
+;; 最小值
+(Enumerable/Min numbers)
+;; => 1
+
+;; 计数
+(Enumerable/Count numbers)
+;; => 5
+#+END_SRC
+
+* 定义类型 (Defining Types)
+
+ClojureCLR 实现了所有 Clojure 的类型定义方法，并扩展支持 CLR 特有的功能。
+
+** ByRef 参数示例
+
+#+BEGIN_SRC clojure
+;; 定义一个接口，包含 ByRef 方法
+(definterface IByRefExample
+  (^void swap-values [(by-ref ^int a) (by-ref ^int b)]))
+
+;; 实现这个接口
+(deftype ByRefExample []
+  IByRefExample
+  (^void swap-values [this (by-ref ^int a) (by-ref ^int b)]
+    (let [temp a]
+      (set! a b)
+      (set! b temp))))
+
+;; 注意：实际调用 ByRef 方法需要特殊处理
+#+END_SRC
+
+** 显式接口实现完整示例
+
+#+BEGIN_SRC clojure
+;; 定义两个有相同方法签名的接口
+(definterface ICalculator
+  (^Int32 calculate [^Int32 x]))
+
+(definterface IProcessor
+  (^Int32 calculate [^Int32 x]))
+
+;; 实现类 - 使用显式接口实现
+(deftype DualService []
+  ICalculator
+  (^Int32 calculate [this ^Int32 x]
+    (* x 2))  ; ICalculator 的实现：乘以 2
+
+  IProcessor
+  (^Int32 user.IProcessor.calculate [this ^Int32 x]  ; 显式实现
+    (+ x 10)))  ; IProcessor 的实现：加 10
+
+;; 测试
+(def service (DualService.))
+
+;; 默认调用 ICalculator 的实现
+(.calculate service 5)
+;; => 10
+
+;; 通过类型提示调用 IProcessor 的实现
+(.calculate ^user.IProcessor service 5)
+;; => 15
+#+END_SRC
+
+** 完整类型定义示例
+
+#+BEGIN_SRC clojure
+;; 定义接口
+(definterface IShape
+  (^Double getArea [])
+  (^Double getPerimeter []))
+
+;; 定义记录类型
+(defrecord Rectangle [^Double width ^Double height]
+  IShape
+  (^Double getArea [this]
+    (* width height))
+  (^Double getPerimeter [this]
+    (* 2 (+ width height))))
+
+;; 创建实例
+(def rect (Rectangle. 5.0 3.0))
+
+;; 访问字段
+(:width rect)
+;; => 5.0
+
+(:height rect)
+;; => 3.0
+
+;; 调用接口方法
+(.getArea rect)
+;; => 15.0
+
+(.getPerimeter rect)
+;; => 16.0
+#+END_SRC
+
+** 使用 reify 创建匿名实现
+
+#+BEGIN_SRC clojure
+;; 定义一个简单接口
+(definterface IGreeter
+  (^String greet [^String name]))
+
+;; 使用 reify 创建匿名实现
+(defn create-greeter [greeting]
+  (reify IGreeter
+    (^String greet [this ^String name]
+      (str greeting ", " name "!"))))
+
+;; 创建不同的 greeter
+(def hello-greeter (create-greeter "Hello"))
+(def hi-greeter (create-greeter "Hi"))
+
+;; 使用
+(.greet hello-greeter "Alice")
+;; => "Hello, Alice!"
+
+(.greet hi-greeter "Bob")
+;; => "Hi, Bob!"
+#+END_SRC
+
+** 实现 IDisposable 接口
+
+#+BEGIN_SRC clojure
+;; 实现 IDisposable 是 CLR 中常见的模式
+(import 'System.IDisposable)
+
+(deftype Resource [resource-name]
+  IDisposable
+  (Dispose [this]
+    (println (str "Disposing resource: " resource-name)))
+
+  Object
+  (ToString [this]
+    (str "Resource[" resource-name "]")))
+
+;; 创建资源
+(def r (Resource. "FileHandle"))
+
+;; 转换为字符串
+(.ToString r)
+;; => "Resource[FileHandle]"
+
+;; 使用完后释放（在实际代码中使用 with-open 或 try-finally）
+(.Dispose r)
+;; => 打印 "Disposing resource: FileHandle"
+#+END_SRC
+
+** 使用 proxy 扩展现有类
+
+#+BEGIN_SRC clojure
+;; 创建 EventArgs 的子类
+(import 'System.EventArgs)
+
+(def custom-event-args
+  (proxy [EventArgs] []
+    (ToString []
+      "CustomEventArgs[modified]")))
+
+;; 测试
+(.ToString custom-event-args)
+;; => "CustomEventArgs[modified]"
+
+;; 创建带字段的代理
+(defrecord DataEventArgs [data])
+
+(def data-event
+  (proxy [EventArgs] []
+    (ToString []
+      (str "DataEventArgs[data=" (:data (DataEventArgs. "test")) "]"))))
+#+END_SRC
+
+** gen-interface 完整示例
+
+#+BEGIN_SRC clojure
+;; 生成新的接口
+(gen-interface
+  :name IValidator
+  :methods [[validate [Object] Boolean]
+            [getErrorMessage [] String]])
+
+;; 使用生成的接口
+(deftype StringValidator [^Int32 minLength]
+  IValidator
+  (validate [this ^String value]
+    (>= (.Length value) minLength))
+  (getErrorMessage [this]
+    (str "String must be at least " minLength " characters long")))
+
+;; 测试
+(def validator (StringValidator. 5))
+
+(.validate validator "hello")
+;; => true
+
+(.validate validator "hi")
+;; => false
+
+(.getErrorMessage validator)
+;; => "String must be at least 5 characters long"
+#+END_SRC
+
+** 协议 (Protocol) 示例
+
+#+BEGIN_SRC clojure
+;; 定义协议
+(defprotocol IResizable
+  (resize [this new-width new-height])
+  (scale [this factor]))
+
+;; 使用 deftype 实现协议
+(deftype ResizableRectangle [^{:volatile-mutable true} width
+                             ^{:volatile-mutable true} height]
+  IResizable
+  (resize [this new-w new-h]
+    (set! width new-w)
+    (set! height new-h)
+    this)
+  (scale [this factor]
+    (set! width (* width factor))
+    (set! height (* height factor))
+    this)
+
+  Object
+  (ToString [this]
+    (str "ResizableRectangle[" width "x" height "]")))
+
+;; 创建实例
+(def rect (ResizableRectangle. 10.0 5.0))
+
+(.ToString rect)
+;; => "ResizableRectangle[10.0x5.0]"
+
+;; 缩放
+(scale rect 2.0)
+(.ToString rect)
+;; => "ResizableRectangle[20.0x10.0]"
+
+;; 调整大小
+(resize rect 100.0 50.0)
+(.ToString rect)
+;; => "ResizableRectangle[100.0x50.0]"
+#+END_SRC
+
+* 学习建议
+
+1. 逐项执行上述代码示例，观察输出结果
+2. 特别注意 CLR 与 JVM 的差异：
+   - 嵌套类使用 + 而非 $
+   - 属性访问方式不同
+   - 泛型类型的语法
+3. 尝试修改示例代码，观察不同参数的影响
+4. 练习使用 sys-func 和 type-args 解决泛型方法调用问题
+5. 实践显式接口实现和 ByRef 参数的使用
+
+* 参考链接
+
+- ClojureCLR 仓库: https://github.com/clojure/clojure-clr
+- Wiki 首页: https://github.com/clojure/clojure-clr/wiki
+- Clojure 官方文档: https://clojure.org
