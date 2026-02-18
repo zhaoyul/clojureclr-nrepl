@@ -1,0 +1,218 @@
+# ClojureCLR nREPL Server
+
+一个基于 C# 实现的 nREPL 服务器，专为 ClojureCLR 设计。支持 CIDER、Calva 等标准 nREPL 客户端。
+
+## 特性
+
+- **完整协议支持**: Bencode 编码/解码，会话管理
+- **CIDER 兼容**: 支持自动补全、文档查询、参数提示等 middleware
+- **轻量级**: 单文件实现，零 Clojure 依赖（运行时自动加载）
+- **跨平台**: 基于 .NET 8.0，支持 Windows、macOS、Linux
+
+## 快速开始
+
+```bash
+dotnet run
+```
+
+服务器将在 `127.0.0.1:1667` 启动。
+
+详细使用指南：
+- [QUICKSTART.md](./QUICKSTART.md) - 5 分钟快速上手
+- [USAGE.md](./USAGE.md) - 完整使用文档
+
+### 连接客户端
+
+**CIDER (Emacs):**
+```elisp
+M-x cider-connect-clj
+Host: 127.0.0.1
+Port: 1667
+```
+
+**Calva (VS Code):**
+1. `Cmd/Ctrl+Shift+P` → "Calva: Connect to a Running REPL Server"
+2. 选择 "nREPL"
+3. 输入 `127.0.0.1:1667`
+
+**命令行测试:**
+```bash
+# 使用 Python 测试脚本
+python3 test_nrepl.py
+```
+
+## 支持的 nREPL 操作
+
+### 核心操作
+
+| 操作          | 说明           | 状态 |
+|---------------|----------------|------|
+| `eval`        | 代码求值       | ✅   |
+| `clone`       | 创建新会话     | ✅   |
+| `close`       | 关闭会话       | ✅   |
+| `ls-sessions` | 列出会话       | ✅   |
+| `describe`    | 服务器能力描述 | ✅   |
+| `interrupt`   | 中断执行       | ✅   |
+| `load-file`   | 加载文件       | ✅   |
+| `stdin`       | 标准输入       | ✅   |
+
+### Middleware 功能
+
+| 操作       | 说明         | CIDER 使用场景         | 状态 |
+|------------|--------------|------------------------|------|
+| `complete` | 自动补全     | `M-TAB` 补全代码       | ✅   |
+| `info`     | 符号信息查询 | `C-c C-d C-d` 查看文档 | ✅   |
+| `eldoc`    | 函数参数提示 | Minibuffer 显示参数    | ✅   |
+
+## 技术实现
+
+### 项目结构
+
+```
+.
+├── Program.cs              # 主实现（Bencode + nREPL 协议）
+├── clojureCLR-nrepl.csproj # .NET 项目文件
+├── test_nrepl.py           # Python 测试脚本
+└── README.md               # 本文档
+```
+
+### 核心组件
+
+1. **Bencode 编解码器**: 支持字典、列表、整数、字符串
+2. **会话管理**: 基于 GUID 的会话跟踪
+3. **Namespace 切换**: 支持 `in-ns` 和跨会话命名空间保持
+4. **Middleware 框架**: 可扩展的操作处理器
+
+### 实现细节
+
+```csharp
+// 处理 nREPL 消息
+private string HandleMessage(NetworkStream stream, Dictionary<string, object> request,
+                             string sessionId, bool useLengthPrefix, Session session)
+{
+    var op = request.GetValueOrDefault("op") as string;
+    switch (op)
+    {
+        case "eval": HandleEval(...); break;
+        case "complete": HandleComplete(...); break;
+        case "eldoc": HandleEldoc(...); break;
+        // ...
+    }
+}
+```
+
+## 开发路线图
+
+### 当前版本 (v0.1.x)
+
+- ✅ 基础 nREPL 协议
+- ✅ CIDER 基础 middleware (complete, info, eldoc)
+- ✅ 会话管理
+- ✅ 命名空间切换
+
+### 计划功能
+
+#### 🔴 高优先级
+
+| 功能          | 说明                 | CIDER 集成              |
+|---------------|----------------------|-------------------------|
+| `ns-path`     | 查找命名空间文件路径 | 跳转到定义              |
+| `apropos`     | 符号搜索             | `M-x cider-apropos`     |
+| `macroexpand` | 宏展开               | `M-x cider-macroexpand` |
+| `classpath`   | 类路径查询           | 检查依赖                |
+
+#### 🟡 中优先级
+
+| 功能              | 说明              | CIDER 集成                 |
+|-------------------|-------------------|----------------------------|
+| `refresh`/`clear` | 代码热重载        | `M-x cider-ns-refresh`     |
+| `test`            | 运行测试          | `M-x cider-test-run-tests` |
+| `format`          | 代码格式化        | `M-x cider-format-buffer`  |
+| `spec`            | Clojure Spec 支持 | Spec 检查                  |
+
+#### 🟢 低优先级
+
+| 功能                      | 说明             | CIDER 集成 |
+|---------------------------|------------------|------------|
+| `fn-deps`/`fn-refs`       | 函数依赖/引用    | 代码分析   |
+| `xrefs`                   | 交叉引用         | 重构支持   |
+| `clojuredocs-lookup`      | 查询 ClojureDocs | 社区文档   |
+| `analyze-last-stacktrace` | 异常堆栈分析     | 错误美化   |
+
+### 技术债务
+
+- [ ] 支持长度前缀格式的 Bencode 消息
+- [ ] 更完善的错误处理和日志
+- [ ] 配置选项（端口、主机、日志级别）
+- [ ] 性能优化（大型消息处理）
+
+## 贡献指南
+
+### 添加新 Middleware
+
+1. 在 `HandleMessage` 中添加新的 case:
+
+```csharp
+case "new-op":
+    HandleNewOp(stream, request, sessionId, useLengthPrefix, session);
+    break;
+```
+
+2. 实现处理器:
+
+```csharp
+private void HandleNewOp(NetworkStream stream, Dictionary<string, object> request,
+                         string sessionId, bool useLengthPrefix, Session session)
+{
+    var id = GetId(request);
+    // ... 实现逻辑
+
+    SendResponse(stream, new Dictionary<string, object>
+    {
+        ["id"] = id,
+        ["session"] = sessionId,
+        ["result"] = result,
+        ["status"] = new List<string> { "done" }
+    }, useLengthPrefix);
+}
+```
+
+3. 更新 `CreateDescribeResponse` 声明支持的操作
+
+### 测试
+
+```bash
+# 运行服务器
+dotnet run &
+
+# 运行 Python 测试
+python3 test_nrepl.py
+
+# 或使用 clj-nrepl-eval
+clj-nrepl-eval --port 1667 "(+ 1 2 3)"
+```
+
+## 使用场景
+
+### 1. ClojureCLR 开发
+直接连接 CIDER/Calva 进行 ClojureCLR 项目开发，享受完整的 IDE 支持。
+
+### 2. Unity 游戏开发
+将服务器嵌入 Unity 项目，运行时热重载 Clojure 脚本。
+
+### 3. .NET 应用脚本化
+为现有 .NET 应用提供 Clojure 脚本能力，nREPL 作为管理接口。
+
+### 4. 数据分析与探索
+结合 Clojure 的数据处理能力和 .NET 的性能，进行交互式数据分析。
+
+## 相关项目
+
+- [ClojureCLR](https://github.com/clojure/clojure-clr) - Clojure 的 .NET 实现
+- [nREPL](https://nrepl.org/) - nREPL 协议规范
+- [CIDER](https://github.com/clojure-emacs/cider) - Emacs 的 Clojure IDE
+- [Calva](https://github.com/BetterThanTomorrow/calva) - VS Code 的 Clojure 插件
+
+## 许可证
+
+MIT License - 详见 LICENSE 文件
