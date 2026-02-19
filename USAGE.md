@@ -24,13 +24,13 @@ git clone <your-repo-url>
 cd clojureCLR-nrepl
 
 # 运行
-dotnet run
+dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 
 # 后台运行（Linux/macOS）
-dotnet run &
+dotnet run --project cli/clojureCLR-nrepl-cli.csproj &
 
 # Windows 后台运行
-start dotnet run
+start dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 ```
 
 ### 使用发布版本
@@ -257,50 +257,17 @@ public class ClojureNReplService : ServiceBase
 
 修改 `Program.cs` 支持命令行参数：
 
-```csharp
-// 在 Main 方法中
-static void Main(string[] args)
-{
-    var host = "127.0.0.1";
-    var port = 1667;
-
-    for (int i = 0; i < args.Length; i++)
-    {
-        switch (args[i])
-        {
-            case "--host" when i + 1 < args.Length:
-                host = args[++i];
-                break;
-            case "--port" when i + 1 < args.Length:
-                port = int.Parse(args[++i]);
-                break;
-            case "--help":
-                Console.WriteLine("Usage: clojureCLR-nrepl [--host HOST] [--port PORT]");
-                return;
-        }
-    }
-
-    var server = new NReplServer(host, port);
-    server.Start();
-
-    Console.WriteLine($"nREPL server started on {host}:{port}");
-    Console.WriteLine("Press Enter to stop...");
-    Console.ReadLine();
-
-    server.Stop();
-}
-```
-
-使用：
-```bash
-dotnet run -- --host 0.0.0.0 --port 7888
-```
-
-### 环境变量配置
+CLI 使用环境变量配置：
 
 ```csharp
 var host = Environment.GetEnvironmentVariable("NREPL_HOST") ?? "127.0.0.1";
 var port = int.Parse(Environment.GetEnvironmentVariable("NREPL_PORT") ?? "1667");
+```
+
+使用：
+```bash
+NREPL_HOST=0.0.0.0 NREPL_PORT=7888 \
+  dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 ```
 
 ### 配置文件
@@ -526,7 +493,7 @@ lsof -i:1667
 netstat -an | grep 1667
 
 # 使用其他端口
-dotnet run -- --port 7888
+NREPL_PORT=7888 dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 ```
 
 ### 连接被拒绝

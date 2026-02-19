@@ -6,7 +6,7 @@
 # 下载并运行
 git clone <repo-url>
 cd clojureCLR-nrepl
-dotnet run
+dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 
 # 连接 CIDER
 M-x cider-connect-clj  # 127.0.0.1:1667
@@ -40,7 +40,7 @@ make test
 make release
 
 # 自定义端口
-dotnet run -- --port 7888
+NREPL_PORT=7888 dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 ```
 
 ## 4. 客户端连接

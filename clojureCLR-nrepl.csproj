@@ -1,15 +1,33 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>Library</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>clojureCLR_nrepl</RootNamespace>
     <AssemblyName>clojureCLR-nrepl</AssemblyName>
+
+    <PackageId>ClojureCLR.NRepl</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>ClojureCLR nREPL Contributors</Authors>
+    <Description>Lightweight nREPL server for ClojureCLR.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>clojure;clojureclr;nrepl</PackageTags>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- ClojureCLR 核心库 -->
     <PackageReference Include="Clojure" Version="1.12.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="LICENSE" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="cli/**" />
   </ItemGroup>
 
 </Project>

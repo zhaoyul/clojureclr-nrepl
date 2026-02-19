@@ -258,7 +258,7 @@ namespace clojureCLR_nrepl
         }
     }
 
-    class NReplServer
+    public class NReplServer
     {
         private TcpListener listener;
         private bool running = false;
@@ -2686,31 +2686,4 @@ namespace clojureCLR_nrepl
         public Namespace CurrentNamespace { get; set; }
     }
 
-    class Program
-    {
-        static void Main(string[] args)
-        {
-            Console.WriteLine("========================================");
-            Console.WriteLine("  ClojureCLR nREPL Server");
-            Console.WriteLine("========================================");
-            Console.WriteLine();
-
-            try
-            {
-                var server = new NReplServer("127.0.0.1", 1667);
-                server.Start();
-
-                while (true)
-                {
-                    Thread.Sleep(1000);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
-                Environment.Exit(1);
-            }
-        }
-    }
 }

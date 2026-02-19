@@ -13,7 +13,7 @@
 ## 快速开始
 
 ```bash
-dotnet run
+dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 ```
 
 服务器将在 `127.0.0.1:1667` 启动。
@@ -190,7 +190,7 @@ private void HandleNewOp(NetworkStream stream, Dictionary<string, object> reques
 
 ```bash
 # 运行服务器
-dotnet run &
+dotnet run --project cli/clojureCLR-nrepl-cli.csproj &
 
 # 运行 Python 测试
 python3 test_nrepl.py
