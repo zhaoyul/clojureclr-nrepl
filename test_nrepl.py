@@ -179,18 +179,57 @@ class NReplTest:
             self.failed += 1
             return False
     
-    def test_complete(self, symbol, ns="clojure.core"):
+    def _get_completions(self, responses):
+        for r in responses:
+            if "completions" in r:
+                return r["completions"]
+        return None
+
+    def test_complete(self, symbol, ns="clojure.core", expected=None):
         """Test complete middleware"""
         print(f"\n=== Test: complete '{symbol}' ===")
-        self.send({"op": "complete", "id": 4, "session": self.session, 
-                   "symbol": symbol, "ns": ns})
+        msg = {"op": "complete", "id": 4, "session": self.session,
+               "symbol": symbol}
+        if ns is not None:
+            msg["ns"] = ns
+        self.send(msg)
         responses = self.recv()
-        
-        if responses and "completions" in responses[0]:
-            completions = responses[0]["completions"]
+        completions = self._get_completions(responses)
+
+        if completions is not None:
             print(f"✓ Found {len(completions)} completions")
             for c in completions[:3]:
                 print(f"  - {c.get('candidate')} ({c.get('type')})")
+            if expected and not any(c.get("candidate") == expected for c in completions):
+                print(f"✗ Expected candidate '{expected}' not found")
+                self.failed += 1
+                return False
+            self.passed += 1
+            return True
+        else:
+            print("✗ No completions")
+            self.failed += 1
+            return False
+
+    def test_complete_from_line(self, line, column, ns=None, expected=None):
+        """Test complete using line/column extraction"""
+        print(f"\n=== Test: complete from line '{line}' @ {column} ===")
+        msg = {"op": "complete", "id": 10, "session": self.session,
+               "line": line, "column": column}
+        if ns:
+            msg["ns"] = ns
+        self.send(msg)
+        responses = self.recv()
+        completions = self._get_completions(responses)
+
+        if completions is not None:
+            print(f"✓ Found {len(completions)} completions")
+            for c in completions[:3]:
+                print(f"  - {c.get('candidate')} ({c.get('type')})")
+            if expected and not any(c.get("candidate") == expected for c in completions):
+                print(f"✗ Expected candidate '{expected}' not found")
+                self.failed += 1
+                return False
             self.passed += 1
             return True
         else:
@@ -304,14 +343,33 @@ def main():
         test.test_eval('(str "hello" " world")', "hello world")
         
         # Middleware tests
-        test.test_complete("map")
-        test.test_complete("str/join")  # Namespace shorthand
+        test.test_complete("map", expected="map")
+        test.test_complete("str/join", expected="str/join")  # Namespace shorthand
         test.test_info("reduce")
         test.test_eldoc("map")
         test.test_eldoc("xyz123")  # Invalid symbol
+
+        # Completion: fully qualified CLR type without prior import
+        test.test_complete_from_line("(System.Linq.Enumerable/Wh", len("(System.Linq.Enumerable/Wh"), expected="System.Linq.Enumerable/Where")
         
         # Namespace switching
         test.test_in_ns()
+
+        # Completion: CLR static members (Type/Member)
+        test.test_eval("(import 'System.Linq.Enumerable)", "System.Linq.Enumerable")
+        test.test_complete_from_line("(Enumerable/Wh", len("(Enumerable/Wh"), expected="Enumerable/Where")
+        test.test_info("Enumerable/Where")
+        test.test_eldoc("Enumerable/Where")
+
+        # Completion: instance members via dot form
+        test.test_eval('(def s "Hello")', "s")
+        test.test_complete_from_line("(. s Sub", len("(. s Sub"), expected="Substring")
+
+        # Completion: ns parameter affects session (without passing ns on complete)
+        test.send({"op": "eval", "id": 11, "session": test.session,
+                   "ns": "clojure.string", "code": "(ns-name *ns*)"})
+        test.recv()
+        test.test_complete("join", ns=None, expected="join")  # should resolve in clojure.string now
         
     except Exception as e:
         print(f"\n✗ Test error: {e}")

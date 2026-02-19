@@ -8,6 +8,7 @@
 - **CIDER 兼容**: 支持自动补全、文档查询、参数提示等 middleware
 - **轻量级**: 单文件实现，零 Clojure 依赖（运行时自动加载）
 - **跨平台**: 基于 .NET 8.0，支持 Windows、macOS、Linux
+- **CLR 静态成员补全**: 支持 `Type/Member`（例如 `Enumerable/Where`），前提是已 `import` 对应类型
 
 ## 快速开始
 
@@ -63,6 +64,12 @@ python3 test_nrepl.py
 | `complete` | 自动补全     | `M-TAB` 补全代码       | ✅   |
 | `info`     | 符号信息查询 | `C-c C-d C-d` 查看文档 | ✅   |
 | `eldoc`    | 函数参数提示 | Minibuffer 显示参数    | ✅   |
+
+补全能力（摘要）:
+- Clojure 命名空间中的 var/macro
+- CLR 静态成员补全：`Type/Member`（已导入类型或完整类型名）
+- 实例成员补全：`. 形式`（接收者为命名空间中可解析的符号）
+- `info`/`eldoc` 支持 CLR 静态成员
 
 ## 技术实现
 

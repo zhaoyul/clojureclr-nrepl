@@ -1,12 +1,14 @@
 // ClojureCLR nREPL Server - C# implementation
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using clojure.lang;
 
@@ -263,11 +265,27 @@ namespace clojureCLR_nrepl
         private readonly int port;
         private readonly string host;
         private readonly Dictionary<string, Session> sessions = new Dictionary<string, Session>();
+        private readonly bool debugComplete;
+        private readonly bool debugEldoc;
+        private static readonly ConcurrentDictionary<Type, MemberCache> MemberCacheByType =
+            new ConcurrentDictionary<Type, MemberCache>();
+
+        private sealed class MemberCache
+        {
+            public string[] StaticMethods = Array.Empty<string>();
+            public string[] StaticProperties = Array.Empty<string>();
+            public string[] StaticFields = Array.Empty<string>();
+            public string[] InstanceMethods = Array.Empty<string>();
+            public string[] InstanceProperties = Array.Empty<string>();
+            public string[] InstanceFields = Array.Empty<string>();
+        }
 
         public NReplServer(string host, int port)
         {
             this.host = host;
             this.port = port;
+            debugComplete = IsEnvTrue("NREPL_DEBUG_COMPLETE");
+            debugEldoc = IsEnvTrue("NREPL_DEBUG_ELDOC");
         }
 
         public void Start()
@@ -890,17 +908,79 @@ namespace clojureCLR_nrepl
             var id = GetId(request);
             var filePath = request.GetValueOrDefault("file-path") as string;
             var fileName = request.GetValueOrDefault("file-name") as string;
+            var fileContent = request.GetValueOrDefault("file") as string;
 
             Console.WriteLine($"Load file: {fileName} at {filePath}");
 
-            // Load file not fully supported
-            SendResponse(stream, new Dictionary<string, object>
+            try
             {
-                ["id"] = id,
-                ["session"] = sessionId,
-                ["value"] = "nil",
-                ["status"] = new List<string> { "done" }
-            }, useLengthPrefix);
+                if (string.IsNullOrEmpty(fileContent) && !string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+                {
+                    fileContent = File.ReadAllText(filePath);
+                }
+
+                if (string.IsNullOrEmpty(fileContent))
+                {
+                    SendResponse(stream, new Dictionary<string, object>
+                    {
+                        ["id"] = id,
+                        ["session"] = sessionId,
+                        ["value"] = "nil",
+                        ["status"] = new List<string> { "done" }
+                    }, useLengthPrefix);
+                    return;
+                }
+
+                var session = sessions.GetValueOrDefault(sessionId);
+                Namespace ns = session?.CurrentNamespace ?? RT.CurrentNSVar.deref() as Namespace;
+
+                if (ns != null)
+                {
+                    Var.pushThreadBindings(RT.map(RT.CurrentNSVar, ns));
+                }
+
+                string resultValue;
+                Namespace resultNs = ns;
+                try
+                {
+                    var loadString = RT.var("clojure.core", "load-string");
+                    var prStr = RT.var("clojure.core", "pr-str");
+                    var result = loadString.invoke(fileContent);
+                    resultValue = prStr.invoke(result) as string;
+                    resultNs = RT.CurrentNSVar.deref() as Namespace ?? ns;
+                }
+                finally
+                {
+                    if (ns != null)
+                    {
+                        Var.popThreadBindings();
+                    }
+                }
+
+                if (session != null && resultNs != null)
+                {
+                    session.CurrentNamespace = resultNs;
+                }
+
+                SendResponse(stream, new Dictionary<string, object>
+                {
+                    ["id"] = id,
+                    ["session"] = sessionId,
+                    ["value"] = resultValue ?? "nil",
+                    ["ns"] = resultNs?.Name?.Name ?? "user",
+                    ["status"] = new List<string> { "done" }
+                }, useLengthPrefix);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Load file error: {e.Message}");
+                SendResponse(stream, new Dictionary<string, object>
+                {
+                    ["id"] = id,
+                    ["session"] = sessionId,
+                    ["status"] = new List<string> { "eval-error", "done" }
+                }, useLengthPrefix);
+            }
         }
 
         private void HandleComplete(NetworkStream stream, Dictionary<string, object> request, string sessionId, bool useLengthPrefix, Session session)
@@ -918,10 +998,43 @@ namespace clojureCLR_nrepl
                 prefix = ExtractPrefixFromRequest(request);
             }
 
+            if (debugComplete)
+            {
+                Console.WriteLine($"Complete request fields: {FormatCompleteDebug(request)}");
+            }
             Console.WriteLine($"Complete request: prefix='{prefix}', ns='{nsName}'");
 
             try
             {
+                var dotCompletions = TryGetDotCompletions(request, nsName, session);
+                if (dotCompletions != null && dotCompletions.Count > 0)
+                {
+                    SendResponse(stream, new Dictionary<string, object>
+                    {
+                        ["id"] = id,
+                        ["session"] = sessionId,
+                        ["completions"] = dotCompletions,
+                        ["status"] = new List<string> { "done" }
+                    }, useLengthPrefix);
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(prefix) && prefix.StartsWith("."))
+                {
+                    var dotPrefixCompletions = TryGetDotCompletionsFromPrefix(prefix, request, nsName, session);
+                    if (dotPrefixCompletions != null && dotPrefixCompletions.Count > 0)
+                    {
+                        SendResponse(stream, new Dictionary<string, object>
+                        {
+                            ["id"] = id,
+                            ["session"] = sessionId,
+                            ["completions"] = dotPrefixCompletions,
+                            ["status"] = new List<string> { "done" }
+                        }, useLengthPrefix);
+                        return;
+                    }
+                }
+
                 var completions = GetCompletions(prefix, nsName, session);
 
                 SendResponse(stream, new Dictionary<string, object>
@@ -951,17 +1064,7 @@ namespace clojureCLR_nrepl
             var prefixLower = prefix.ToLowerInvariant();
 
             // Get the namespace to search in
-            Namespace ns = null;
-            if (!string.IsNullOrEmpty(nsName))
-            {
-                try
-                {
-                    var findNs = RT.var("clojure.core", "find-ns");
-                    ns = findNs.invoke(Symbol.create(nsName)) as Namespace;
-                }
-                catch { }
-            }
-            ns = ns ?? session?.CurrentNamespace ?? RT.CurrentNSVar.deref() as Namespace;
+            var ns = ResolveNamespace(nsName, session);
 
             if (ns == null) return completions;
 
@@ -1183,63 +1286,788 @@ namespace clojureCLR_nrepl
             }
             catch { }
 
+            // Heuristic: try loading assembly by namespace prefix
+            try
+            {
+                var parts = name.Split('.');
+                if (parts.Length >= 2)
+                {
+                    var candidates = new List<string>
+                    {
+                        $"{parts[0]}.{parts[1]}",
+                        parts[0]
+                    };
+
+                    foreach (var asmName in candidates)
+                    {
+                        try
+                        {
+                            var asm = Assembly.Load(new AssemblyName(asmName));
+                            var t = asm.GetType(name, false, false);
+                            if (t != null) return t;
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+
             return null;
+        }
+
+        private MemberCache GetMemberCache(Type type)
+        {
+            return MemberCacheByType.GetOrAdd(type, BuildMemberCache);
+        }
+
+        private MemberCache BuildMemberCache(Type type)
+        {
+            var cache = new MemberCache
+            {
+                StaticMethods = GetMethodNames(type, BindingFlags.Public | BindingFlags.Static),
+                StaticProperties = GetPropertyNames(type, BindingFlags.Public | BindingFlags.Static),
+                StaticFields = GetFieldNames(type, BindingFlags.Public | BindingFlags.Static),
+                InstanceMethods = GetMethodNames(type, BindingFlags.Public | BindingFlags.Instance),
+                InstanceProperties = GetPropertyNames(type, BindingFlags.Public | BindingFlags.Instance),
+                InstanceFields = GetFieldNames(type, BindingFlags.Public | BindingFlags.Instance)
+            };
+
+            return cache;
+        }
+
+        private string[] GetMethodNames(Type type, BindingFlags flags)
+        {
+            try
+            {
+                var methods = type.GetMethods(flags);
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var method in methods)
+                {
+                    if (method.IsSpecialName) continue; // skip get_/set_/op_*
+                    names.Add(method.Name);
+                }
+                return new List<string>(names).ToArray();
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+        }
+
+        private string[] GetPropertyNames(Type type, BindingFlags flags)
+        {
+            try
+            {
+                var properties = type.GetProperties(flags);
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var prop in properties)
+                {
+                    names.Add(prop.Name);
+                }
+                return new List<string>(names).ToArray();
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+        }
+
+        private string[] GetFieldNames(Type type, BindingFlags flags)
+        {
+            try
+            {
+                var fields = type.GetFields(flags);
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var field in fields)
+                {
+                    names.Add(field.Name);
+                }
+                return new List<string>(names).ToArray();
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+        }
+
+        private void AddMemberCompletions(List<Dictionary<string, object>> completions, string candidatePrefix, string memberPrefixLower, string[] members, string memberType, string nsName, HashSet<string> seen)
+        {
+            if (members == null || members.Length == 0) return;
+            foreach (var name in members)
+            {
+                if (!name.ToLowerInvariant().StartsWith(memberPrefixLower)) continue;
+                if (!seen.Add(name)) continue;
+
+                completions.Add(new Dictionary<string, object>
+                {
+                    ["candidate"] = $"{candidatePrefix}{name}",
+                    ["type"] = memberType,
+                    ["ns"] = nsName,
+                    ["doc"] = ""
+                });
+            }
         }
 
         private void AddTypeCompletions(List<Dictionary<string, object>> completions, string typeAlias, string memberPrefixLower, Type type)
         {
-            var flags = BindingFlags.Public | BindingFlags.Static;
+            var cache = GetMemberCache(type);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var nsName = type.FullName ?? typeAlias;
+            var prefix = $"{typeAlias}/";
+
+            AddMemberCompletions(completions, prefix, memberPrefixLower, cache.StaticMethods, "method", nsName, seen);
+            AddMemberCompletions(completions, prefix, memberPrefixLower, cache.StaticProperties, "property", nsName, seen);
+            AddMemberCompletions(completions, prefix, memberPrefixLower, cache.StaticFields, "field", nsName, seen);
+        }
+
+        private List<Dictionary<string, object>> TryGetDotCompletions(Dictionary<string, object> request, string nsName, Session session)
+        {
+            var slice = GetContextSlice(request);
+            if (string.IsNullOrEmpty(slice)) return null;
+
+            if (!TryParseDotContext(slice, out var receiver, out var memberPrefix)) return null;
+
+            var ns = ResolveNamespace(nsName, session);
+            if (ns == null) return null;
+
+            var completions = new List<Dictionary<string, object>>();
+            var prefixLower = (memberPrefix ?? "").ToLowerInvariant();
+
+            try
+            {
+                // Resolve receiver symbol to value/type
+                var nsResolve = RT.var("clojure.core", "ns-resolve");
+                var resolved = nsResolve.invoke(ns, Symbol.create(receiver));
+
+                if (resolved is Var v)
+                {
+                    var val = v.deref();
+                    if (val is Type t)
+                    {
+                        AddTypeCompletions(completions, receiver, prefixLower, t);
+                        return completions;
+                    }
+                    if (val != null)
+                    {
+                        AddInstanceCompletions(completions, prefixLower, val.GetType());
+                        return completions;
+                    }
+                }
+                else if (resolved is Type t)
+                {
+                    AddTypeCompletions(completions, receiver, prefixLower, t);
+                    return completions;
+                }
+            }
+            catch { }
+
+            // Fallback: try resolving receiver as type name
+            try
+            {
+                var t = TryResolveType(ns, receiver);
+                if (t != null)
+                {
+                    AddTypeCompletions(completions, receiver, prefixLower, t);
+                    return completions;
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private Dictionary<string, object> TryGetDotEldoc(Dictionary<string, object> request, string symbol, string nsName, Session session)
+        {
+            var ns = ResolveNamespace(nsName, session);
+            if (ns == null) return null;
+
+            string receiver;
+            string memberPrefix;
+            var slice = GetContextSlice(request);
+
+            if (!string.IsNullOrEmpty(slice) && TryParseDotContext(slice, out receiver, out memberPrefix))
+            {
+                // parsed from slice
+            }
+            else
+            {
+                receiver = "";
+                memberPrefix = "";
+
+                var line = request.GetValueOrDefault("line") as string;
+                var buffer = request.GetValueOrDefault("buffer") as string
+                    ?? request.GetValueOrDefault("code") as string
+                    ?? request.GetValueOrDefault("text") as string;
+
+                if (!string.IsNullOrEmpty(line) && TryParseDotContextAny(line, out receiver, out memberPrefix))
+                {
+                    // parsed from full line
+                }
+                else if (!string.IsNullOrEmpty(buffer) && TryParseDotContextAny(buffer, out receiver, out memberPrefix))
+                {
+                    // parsed from buffer
+                }
+                else
+                {
+                    if (!TryGetContextReceiver(request, out receiver))
+                    {
+                        receiver = "";
+                    }
+
+                    if (!string.IsNullOrEmpty(symbol) && symbol.StartsWith("."))
+                    {
+                        memberPrefix = symbol.TrimStart('.');
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(memberPrefix)) return null;
+
+            Type type = null;
+            bool isStatic = false;
+
+            if (!string.IsNullOrEmpty(receiver))
+            {
+                try
+                {
+                    var nsResolve = RT.var("clojure.core", "ns-resolve");
+                    var resolved = nsResolve.invoke(ns, Symbol.create(receiver));
+                    if (resolved is Var v)
+                    {
+                        var val = v.deref();
+                        if (val is Type vt)
+                        {
+                            type = vt;
+                            isStatic = true;
+                        }
+                        else if (val != null)
+                        {
+                            type = val.GetType();
+                            isStatic = false;
+                        }
+                    }
+                    else if (resolved is Type rt)
+                    {
+                        type = rt;
+                        isStatic = true;
+                    }
+                }
+                catch { }
+
+                if (type == null)
+                {
+                    try
+                    {
+                        type = TryResolveType(ns, receiver);
+                        if (type != null) isStatic = true;
+                    }
+                    catch { }
+                }
+            }
+
+            if (type == null) return null;
+
+            var result = new Dictionary<string, object>
+            {
+                ["ns"] = type.FullName ?? type.Name,
+                ["symbol"] = memberPrefix
+            };
+
+            var flags = BindingFlags.Public | (isStatic ? BindingFlags.Static : BindingFlags.Instance);
+            var eldocLists = new List<object>();
 
             try
             {
                 foreach (var method in type.GetMethods(flags))
                 {
-                    if (method.IsSpecialName) continue; // skip get_/set_/op_*
-                    var name = method.Name;
-                    if (!name.ToLowerInvariant().StartsWith(memberPrefixLower)) continue;
-                    if (!seen.Add(name)) continue;
-
-                    completions.Add(new Dictionary<string, object>
+                    if (method.IsSpecialName) continue;
+                    if (!method.Name.StartsWith(memberPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+                    var args = new List<string>();
+                    foreach (var p in method.GetParameters())
                     {
-                        ["candidate"] = $"{typeAlias}/{name}",
-                        ["type"] = "method",
-                        ["ns"] = type.FullName ?? typeAlias,
-                        ["doc"] = ""
-                    });
-                }
-
-                foreach (var prop in type.GetProperties(flags))
-                {
-                    var name = prop.Name;
-                    if (!name.ToLowerInvariant().StartsWith(memberPrefixLower)) continue;
-                    if (!seen.Add(name)) continue;
-
-                    completions.Add(new Dictionary<string, object>
-                    {
-                        ["candidate"] = $"{typeAlias}/{name}",
-                        ["type"] = "property",
-                        ["ns"] = type.FullName ?? typeAlias,
-                        ["doc"] = ""
-                    });
-                }
-
-                foreach (var field in type.GetFields(flags))
-                {
-                    var name = field.Name;
-                    if (!name.ToLowerInvariant().StartsWith(memberPrefixLower)) continue;
-                    if (!seen.Add(name)) continue;
-
-                    completions.Add(new Dictionary<string, object>
-                    {
-                        ["candidate"] = $"{typeAlias}/{name}",
-                        ["type"] = "field",
-                        ["ns"] = type.FullName ?? typeAlias,
-                        ["doc"] = ""
-                    });
+                        args.Add(FormatParameter(p));
+                    }
+                    eldocLists.Add(args);
                 }
             }
             catch { }
+
+            if (eldocLists.Count > 0)
+            {
+                result["type"] = "method";
+                result["eldoc"] = eldocLists;
+                return result;
+            }
+
+            // Try property/field names for eldoc
+            try
+            {
+                foreach (var prop in type.GetProperties(flags))
+                {
+                    if (!prop.Name.StartsWith(memberPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+                    eldocLists.Add(new List<string>());
+                }
+                if (eldocLists.Count > 0)
+                {
+                    result["type"] = "property";
+                    result["eldoc"] = eldocLists;
+                    return result;
+                }
+            }
+            catch { }
+
+            try
+            {
+                foreach (var field in type.GetFields(flags))
+                {
+                    if (!field.Name.StartsWith(memberPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+                    eldocLists.Add(new List<string>());
+                }
+                if (eldocLists.Count > 0)
+                {
+                    result["type"] = "field";
+                    result["eldoc"] = eldocLists;
+                    return result;
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private List<Dictionary<string, object>> TryGetDotCompletionsFromPrefix(string prefix, Dictionary<string, object> request, string nsName, Session session)
+        {
+            var ns = ResolveNamespace(nsName, session);
+            if (ns == null) return null;
+
+            if (!TryGetContextReceiver(request, out var receiver)) return null;
+            if (string.IsNullOrEmpty(receiver)) return null;
+
+            var memberPrefix = prefix.TrimStart('.');
+            var completions = new List<Dictionary<string, object>>();
+            var prefixLower = memberPrefix.ToLowerInvariant();
+
+            try
+            {
+                if (TryResolveReceiver(ns, receiver, out var type, out var isStatic, out var instanceType))
+                {
+                    if (isStatic)
+                    {
+                        var cache = GetMemberCache(type);
+                        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        var nsNameResolved = type.FullName ?? receiver;
+                        AddMemberCompletions(completions, ".", prefixLower, cache.StaticMethods, "method", nsNameResolved, seen);
+                        AddMemberCompletions(completions, ".", prefixLower, cache.StaticProperties, "property", nsNameResolved, seen);
+                        AddMemberCompletions(completions, ".", prefixLower, cache.StaticFields, "field", nsNameResolved, seen);
+                        return completions;
+                    }
+                    if (instanceType != null)
+                    {
+                        var cache = GetMemberCache(instanceType);
+                        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        var nsNameResolved = instanceType.FullName ?? instanceType.Name;
+                        AddMemberCompletions(completions, ".", prefixLower, cache.InstanceMethods, "method", nsNameResolved, seen);
+                        AddMemberCompletions(completions, ".", prefixLower, cache.InstanceProperties, "property", nsNameResolved, seen);
+                        AddMemberCompletions(completions, ".", prefixLower, cache.InstanceFields, "field", nsNameResolved, seen);
+                        return completions;
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private string GetContextSlice(Dictionary<string, object> request)
+        {
+            var line = request.GetValueOrDefault("line") as string;
+            var buffer = request.GetValueOrDefault("buffer") as string
+                ?? request.GetValueOrDefault("code") as string
+                ?? request.GetValueOrDefault("text") as string;
+
+            int? pos = TryGetInt(request, "pos")
+                ?? TryGetInt(request, "cursor")
+                ?? TryGetInt(request, "cursor-pos")
+                ?? TryGetInt(request, "column");
+
+            if (!string.IsNullOrEmpty(line))
+            {
+                var slice = line;
+                if (pos.HasValue)
+                {
+                    var p = Math.Max(0, Math.Min(pos.Value, line.Length));
+                    slice = line.Substring(0, p);
+                }
+                return slice;
+            }
+
+            if (!string.IsNullOrEmpty(buffer))
+            {
+                var slice = buffer;
+                if (pos.HasValue)
+                {
+                    var p = Math.Max(0, Math.Min(pos.Value, buffer.Length));
+                    slice = buffer.Substring(0, p);
+                }
+                return slice;
+            }
+
+            return "";
+        }
+
+        private bool TryParseDotContext(string slice, out string receiver, out string memberPrefix)
+        {
+            receiver = "";
+            memberPrefix = "";
+
+            // Pattern: (. receiver memberPrefix)
+            var m = Regex.Match(slice, @"\(\.\s+([^\s\)]+)\s+([^\s\)]*)$");
+            if (m.Success)
+            {
+                receiver = m.Groups[1].Value;
+                memberPrefix = m.Groups[2].Value;
+                return true;
+            }
+
+            // Pattern: (.Member receiver)  -> method-first style
+            m = Regex.Match(slice, @"\(\.([^\s\)]+)\s+([^\s\)]*)$");
+            if (m.Success)
+            {
+                memberPrefix = m.Groups[1].Value;
+                receiver = m.Groups[2].Value;
+                return !string.IsNullOrEmpty(receiver);
+            }
+
+            return false;
+        }
+
+        private bool TryParseDotContextAny(string text, out string receiver, out string memberPrefix)
+        {
+            receiver = "";
+            memberPrefix = "";
+            if (string.IsNullOrEmpty(text)) return false;
+
+            Match bestMatch = null;
+            var matches1 = Regex.Matches(text, @"\(\.\s+([^\s\)]+)\s+([^\s\)]*)");
+            foreach (Match m in matches1)
+            {
+                if (!m.Success) continue;
+                if (bestMatch == null || m.Index > bestMatch.Index) bestMatch = m;
+            }
+
+            var matches2 = Regex.Matches(text, @"\(\.([^\s\)]+)\s+([^\s\)]*)");
+            foreach (Match m in matches2)
+            {
+                if (!m.Success) continue;
+                if (bestMatch == null || m.Index > bestMatch.Index) bestMatch = m;
+            }
+
+            if (bestMatch == null) return false;
+
+            memberPrefix = bestMatch.Groups[1].Value;
+            receiver = bestMatch.Groups[2].Value;
+
+            if (bestMatch.Value.StartsWith("(. ", StringComparison.Ordinal))
+            {
+                receiver = bestMatch.Groups[1].Value;
+                memberPrefix = bestMatch.Groups[2].Value;
+            }
+
+            return !string.IsNullOrEmpty(memberPrefix);
+        }
+
+        private bool TryGetContextReceiver(Dictionary<string, object> request, out string receiver)
+        {
+            receiver = "";
+            if (!request.TryGetValue("context", out var ctx) || ctx == null) return false;
+
+            if (ctx is List<object> list)
+            {
+                var parts = new List<string>();
+                foreach (var item in list)
+                {
+                    if (item == null) continue;
+                    parts.Add(item.ToString());
+                }
+
+                if (parts.Count == 0) return false;
+
+                var prefixIndex = parts.IndexOf("__prefix__");
+                if (prefixIndex >= 0 && prefixIndex + 1 < parts.Count)
+                {
+                    receiver = parts[prefixIndex + 1];
+                    return !string.IsNullOrEmpty(receiver);
+                }
+
+                if (parts.Count >= 1)
+                {
+                    receiver = parts[parts.Count - 1];
+                    return !string.IsNullOrEmpty(receiver);
+                }
+            }
+            else if (ctx is string s)
+            {
+                var tokens = Regex.Matches(s, @"[^\s\(\)\[\]]+");
+                var parts = new List<string>();
+                foreach (Match m in tokens)
+                {
+                    if (!m.Success) continue;
+                    parts.Add(m.Value);
+                }
+                if (parts.Count == 0) return false;
+
+                var prefixIndex = parts.IndexOf("__prefix__");
+                if (prefixIndex >= 0 && prefixIndex + 1 < parts.Count)
+                {
+                    receiver = parts[prefixIndex + 1];
+                    return !string.IsNullOrEmpty(receiver);
+                }
+
+                receiver = parts[parts.Count - 1];
+                return !string.IsNullOrEmpty(receiver);
+            }
+
+            return false;
+        }
+
+        private bool TryResolveReceiver(Namespace ns, string receiver, out Type type, out bool isStatic, out Type instanceType)
+        {
+            type = null;
+            instanceType = null;
+            isStatic = false;
+
+            if (string.IsNullOrEmpty(receiver)) return false;
+
+            try
+            {
+                var nsResolve = RT.var("clojure.core", "ns-resolve");
+                var resolved = nsResolve.invoke(ns, Symbol.create(receiver));
+
+                if (resolved is Var v)
+                {
+                    var val = v.deref();
+                    if (val is Type vt)
+                    {
+                        type = vt;
+                        isStatic = true;
+                        return true;
+                    }
+                    if (val != null)
+                    {
+                        instanceType = val.GetType();
+                        isStatic = false;
+                        return true;
+                    }
+                }
+                else if (resolved is Type rt)
+                {
+                    type = rt;
+                    isStatic = true;
+                    return true;
+                }
+            }
+            catch { }
+
+            try
+            {
+                type = TryResolveType(ns, receiver);
+                if (type != null)
+                {
+                    isStatic = true;
+                    return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private void AddInstanceCompletions(List<Dictionary<string, object>> completions, string memberPrefixLower, Type type)
+        {
+            var cache = GetMemberCache(type);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var nsName = type.FullName ?? type.Name;
+
+            AddMemberCompletions(completions, "", memberPrefixLower, cache.InstanceMethods, "method", nsName, seen);
+            AddMemberCompletions(completions, "", memberPrefixLower, cache.InstanceProperties, "property", nsName, seen);
+            AddMemberCompletions(completions, "", memberPrefixLower, cache.InstanceFields, "field", nsName, seen);
+        }
+
+        private Dictionary<string, object> TryGetClrMemberInfo(string symbol, Namespace ns, Session session)
+        {
+            if (string.IsNullOrEmpty(symbol) || !symbol.Contains('/')) return null;
+            var parts = symbol.Split('/', 2);
+            if (parts.Length != 2) return null;
+
+            var typeAlias = parts[0];
+            var member = parts[1];
+
+            var type = TryResolveType(ns, typeAlias);
+            if (type == null && session?.CurrentNamespace != null && session.CurrentNamespace != ns)
+            {
+                type = TryResolveType(session.CurrentNamespace, typeAlias);
+            }
+            if (type == null) return null;
+
+            var result = new Dictionary<string, object>
+            {
+                ["ns"] = type.FullName ?? typeAlias,
+                ["name"] = member
+            };
+
+            var flags = BindingFlags.Public | BindingFlags.Static;
+            var methods = type.GetMethods(flags);
+            var methodList = new List<MethodInfo>();
+            foreach (var m in methods)
+            {
+                if (m.Name == member) methodList.Add(m);
+            }
+
+            if (methodList.Count > 0)
+            {
+                result["type"] = "method";
+                result["arglists"] = BuildArglistsString(methodList);
+                return result;
+            }
+
+            var prop = type.GetProperty(member, flags);
+            if (prop != null)
+            {
+                result["type"] = "property";
+                result["arglists"] = "()";
+                result["doc"] = $"Property: {FormatTypeName(prop.PropertyType)}";
+                return result;
+            }
+
+            var field = type.GetField(member, flags);
+            if (field != null)
+            {
+                result["type"] = "field";
+                result["arglists"] = "()";
+                result["doc"] = $"Field: {FormatTypeName(field.FieldType)}";
+                return result;
+            }
+
+            return null;
+        }
+
+        private Dictionary<string, object> TryGetClrMemberEldoc(string symbol, Namespace ns, Session session)
+        {
+            if (string.IsNullOrEmpty(symbol) || !symbol.Contains('/')) return null;
+            var parts = symbol.Split('/', 2);
+            if (parts.Length != 2) return null;
+
+            var typeAlias = parts[0];
+            var member = parts[1];
+
+            var type = TryResolveType(ns, typeAlias);
+            if (type == null && session?.CurrentNamespace != null && session.CurrentNamespace != ns)
+            {
+                type = TryResolveType(session.CurrentNamespace, typeAlias);
+            }
+            if (type == null) return null;
+
+            var result = new Dictionary<string, object>
+            {
+                ["ns"] = type.FullName ?? typeAlias,
+                ["symbol"] = member
+            };
+
+            var flags = BindingFlags.Public | BindingFlags.Static;
+            var methods = type.GetMethods(flags);
+            var methodList = new List<MethodInfo>();
+            foreach (var m in methods)
+            {
+                if (m.Name == member) methodList.Add(m);
+            }
+
+            if (methodList.Count > 0)
+            {
+                var eldocLists = new List<object>();
+                foreach (var m in methodList)
+                {
+                    var args = new List<string>();
+                    var parameters = m.GetParameters();
+                    foreach (var p in parameters)
+                    {
+                        args.Add(FormatParameter(p));
+                    }
+                    eldocLists.Add(args);
+                }
+                result["eldoc"] = eldocLists;
+                result["type"] = "method";
+                return result;
+            }
+
+            var prop = type.GetProperty(member, flags);
+            if (prop != null)
+            {
+                result["eldoc"] = new List<object> { new List<string>() };
+                result["type"] = "property";
+                result["docstring"] = $"Property: {FormatTypeName(prop.PropertyType)}";
+                return result;
+            }
+
+            var field = type.GetField(member, flags);
+            if (field != null)
+            {
+                result["eldoc"] = new List<object> { new List<string>() };
+                result["type"] = "field";
+                result["docstring"] = $"Field: {FormatTypeName(field.FieldType)}";
+                return result;
+            }
+
+            return null;
+        }
+
+        private string BuildArglistsString(List<MethodInfo> methods)
+        {
+            var sigs = new List<string>();
+            foreach (var m in methods)
+            {
+                var parameters = m.GetParameters();
+                var parts = new List<string>();
+                foreach (var p in parameters)
+                {
+                    parts.Add(FormatParameter(p));
+                }
+                sigs.Add($"[{string.Join(" ", parts)}]");
+            }
+            return $"({string.Join(" ", sigs)})";
+        }
+
+        private string FormatParameter(ParameterInfo p)
+        {
+            var type = p.ParameterType;
+            var prefix = "";
+            if (type.IsByRef)
+            {
+                type = type.GetElementType();
+                prefix = p.IsOut ? "out " : "ref ";
+            }
+            var typeName = FormatTypeName(type);
+            if (string.IsNullOrEmpty(p.Name)) return $"{prefix}{typeName}".Trim();
+            return $"{prefix}{typeName} {p.Name}".Trim();
+        }
+
+        private string FormatTypeName(Type t)
+        {
+            if (t == null) return "";
+            if (t.IsArray)
+            {
+                return $"{FormatTypeName(t.GetElementType())}[]";
+            }
+            if (t.IsGenericType)
+            {
+                var name = t.Name;
+                var tick = name.IndexOf('`');
+                if (tick > 0) name = name.Substring(0, tick);
+                var args = t.GetGenericArguments();
+                var argNames = new List<string>();
+                foreach (var a in args) argNames.Add(FormatTypeName(a));
+                return $"{name}<{string.Join(",", argNames)}>";
+            }
+            return t.Name;
         }
 
         private string ExtractPrefixFromRequest(Dictionary<string, object> request)
@@ -1280,6 +2108,92 @@ namespace clojureCLR_nrepl
             return "";
         }
 
+        private string FormatCompleteDebug(Dictionary<string, object> request)
+        {
+            var fields = new List<string>();
+            AddDebugField(fields, request, "symbol");
+            AddDebugField(fields, request, "prefix");
+            AddDebugField(fields, request, "sym");
+            AddDebugField(fields, request, "ns");
+            AddDebugField(fields, request, "pos");
+            AddDebugField(fields, request, "cursor");
+            AddDebugField(fields, request, "cursor-pos");
+            AddDebugField(fields, request, "column");
+            AddDebugTextField(fields, request, "line");
+            AddDebugTextField(fields, request, "buffer");
+            AddDebugTextField(fields, request, "code");
+            AddDebugTextField(fields, request, "text");
+            AddDebugContext(fields, request, "context");
+            return string.Join(", ", fields);
+        }
+
+        private void AddDebugField(List<string> fields, Dictionary<string, object> request, string key)
+        {
+            if (!request.TryGetValue(key, out var val) || val == null) return;
+            fields.Add($"{key}={val}");
+        }
+
+        private void AddDebugTextField(List<string> fields, Dictionary<string, object> request, string key)
+        {
+            if (!request.TryGetValue(key, out var val) || val == null) return;
+            var text = val.ToString() ?? "";
+            if (text.Length > 80)
+            {
+                var start = Math.Max(0, text.Length - 80);
+                var tail = text.Substring(start);
+                fields.Add($"{key}=\"...{tail}\"(len={text.Length})");
+            }
+            else
+            {
+                fields.Add($"{key}=\"{text}\"(len={text.Length})");
+            }
+        }
+
+        private void AddDebugContext(List<string> fields, Dictionary<string, object> request, string key)
+        {
+            if (!request.TryGetValue(key, out var val) || val == null) return;
+            if (val is List<object> list)
+            {
+                var parts = new List<string>();
+                foreach (var item in list)
+                {
+                    parts.Add(item?.ToString() ?? "");
+                }
+                fields.Add($"{key}=[{string.Join(" ", parts)}]");
+                return;
+            }
+            fields.Add($"{key}={val}");
+        }
+
+        private Namespace ResolveNamespace(string nsName, Session session)
+        {
+            Namespace ns = null;
+            if (!string.IsNullOrEmpty(nsName))
+            {
+                try
+                {
+                    var findNs = RT.var("clojure.core", "find-ns");
+                    ns = findNs.invoke(Symbol.create(nsName)) as Namespace;
+                }
+                catch { }
+
+                if (ns != null)
+                {
+                    if (nsName == "clojure.core" && session?.CurrentNamespace != null)
+                    {
+                        var sessionNsName = session.CurrentNamespace?.Name?.Name;
+                        if (!string.IsNullOrEmpty(sessionNsName) && sessionNsName != "clojure.core")
+                        {
+                            return session.CurrentNamespace;
+                        }
+                    }
+                    return ns;
+                }
+            }
+
+            return session?.CurrentNamespace ?? RT.CurrentNSVar.deref() as Namespace;
+        }
+
         private int? TryGetInt(Dictionary<string, object> request, string key)
         {
             if (!request.TryGetValue(key, out var val) || val == null) return null;
@@ -1306,6 +2220,13 @@ namespace clojureCLR_nrepl
             return char.IsLetterOrDigit(c) || c == '_' || c == '-' || c == '+' || c == '*'
                 || c == '?' || c == '!' || c == '$' || c == '<' || c == '>' || c == '='
                 || c == '.' || c == ':' || c == '/' || c == '\\' || c == '\'';
+        }
+
+        private static bool IsEnvTrue(string name)
+        {
+            var val = Environment.GetEnvironmentVariable(name);
+            if (string.IsNullOrEmpty(val)) return false;
+            return val.Equals("1") || val.Equals("true", StringComparison.OrdinalIgnoreCase) || val.Equals("yes", StringComparison.OrdinalIgnoreCase);
         }
 
         private string GetFullNamespaceName(string shorthand)
@@ -1369,19 +2290,16 @@ namespace clojureCLR_nrepl
             var result = new Dictionary<string, object>();
 
             // Get the namespace to search in
-            Namespace ns = null;
-            if (!string.IsNullOrEmpty(nsName))
-            {
-                try
-                {
-                    var findNs = RT.var("clojure.core", "find-ns");
-                    ns = findNs.invoke(Symbol.create(nsName)) as Namespace;
-                }
-                catch { }
-            }
-            ns = ns ?? session?.CurrentNamespace ?? RT.CurrentNSVar.deref() as Namespace;
+            var ns = ResolveNamespace(nsName, session);
 
             if (ns == null) return result;
+
+            // CLR static member info (Type/Member)
+            var clrInfo = TryGetClrMemberInfo(symbol, ns, session);
+            if (clrInfo != null && clrInfo.Count > 0)
+            {
+                return clrInfo;
+            }
 
             // Handle namespace-qualified symbols (e.g., clojure.string/join)
             Var targetVar = null;
@@ -1488,7 +2406,11 @@ namespace clojureCLR_nrepl
                 ?? request.GetValueOrDefault("symbol") as string 
                 ?? "";
             var nsName = request.GetValueOrDefault("ns") as string;
-            
+
+            if (debugEldoc)
+            {
+                Console.WriteLine($"Eldoc request fields: {FormatCompleteDebug(request)}");
+            }
             Console.WriteLine($"Eldoc request: sym='{symbol}', ns='{nsName}'");
 
             try
@@ -1510,13 +2432,24 @@ namespace clojureCLR_nrepl
                 
                 if (!hasEldoc)
                 {
-                    // Return no-eldoc status when no info found (CIDER expects this)
-                    SendResponse(stream, new Dictionary<string, object>
+                    var dotEldoc = TryGetDotEldoc(request, symbol, nsName, session);
+                    if (dotEldoc != null && dotEldoc.GetValueOrDefault("eldoc") is List<object> dotList && dotList.Count > 0)
                     {
-                        ["id"] = id,
-                        ["session"] = sessionId,
-                        ["status"] = new List<string> { "no-eldoc" }
-                    }, useLengthPrefix);
+                        dotEldoc["id"] = id;
+                        dotEldoc["session"] = sessionId;
+                        dotEldoc["status"] = new List<string> { "done" };
+                        SendResponse(stream, dotEldoc, useLengthPrefix);
+                    }
+                    else
+                    {
+                        // Return no-eldoc status when no info found (CIDER expects this)
+                        SendResponse(stream, new Dictionary<string, object>
+                        {
+                            ["id"] = id,
+                            ["session"] = sessionId,
+                            ["status"] = new List<string> { "no-eldoc" }
+                        }, useLengthPrefix);
+                    }
                 }
                 else
                 {
@@ -1544,19 +2477,16 @@ namespace clojureCLR_nrepl
             var result = new Dictionary<string, object>();
             
             // Get the namespace to search in
-            Namespace ns = null;
-            if (!string.IsNullOrEmpty(nsName))
-            {
-                try
-                {
-                    var findNs = RT.var("clojure.core", "find-ns");
-                    ns = findNs.invoke(Symbol.create(nsName)) as Namespace;
-                }
-                catch { }
-            }
-            ns = ns ?? session?.CurrentNamespace ?? RT.CurrentNSVar.deref() as Namespace;
+            var ns = ResolveNamespace(nsName, session);
             
             if (ns == null || string.IsNullOrEmpty(symbol)) return result;
+
+            // CLR static member eldoc (Type/Member)
+            var clrEldoc = TryGetClrMemberEldoc(symbol, ns, session);
+            if (clrEldoc != null && clrEldoc.Count > 0)
+            {
+                return clrEldoc;
+            }
 
             // Resolve the symbol to get the var
             Var targetVar = null;

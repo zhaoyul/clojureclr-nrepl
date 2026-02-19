@@ -331,6 +331,43 @@ var server = new NReplServer(config.Host, config.Port);
 
 ## 5. 最佳实践
 
+### 自动补全（CIDER/Calva）
+
+1. **CLR 类型静态成员补全**
+   已导入类型可直接使用 `Type/Member` 形式补全；也支持完整类型名：
+   ```clojure
+   (import 'System.Linq.Enumerable)
+   (Enumerable/Where ...)
+   (System.Linq.Enumerable/Where ...)
+   ```
+   未导入时不会出现 `Enumerable/*` 补全候选，但 `System.Linq.Enumerable/*` 可用。
+
+2. **实例成员补全（. 形式）**
+   支持以下常见写法（接收者需是命名空间中已解析的符号）：
+   ```clojure
+   (. s Sub)            ; s 为字符串变量
+   (.Substring s)       ; method-first
+   ```
+   如果接收者解析为 `Type`，则会返回该类型的静态成员补全。
+
+3. **补全请求参数**
+   - 大多数客户端会发送 `symbol` 或 `prefix`，服务器直接使用。
+   - 若客户端只发 `line`/`buffer`/`code` + `column`/`cursor`/`pos`，服务器会自动从当前行提取前缀。
+   - 排查补全问题可设置环境变量 `NREPL_DEBUG_COMPLETE=1` 查看请求字段。
+
+4. **已知限制**
+   - 仅支持 **public** 成员。
+   - `.` 补全目前只支持 **符号接收者**（不解析复杂表达式）。
+   - 不做重载参数的智能排序或过滤。
+
+### 符号信息与参数提示
+
+- `info`/`eldoc` 支持 `Type/Member` 的 CLR 静态成员：
+  ```clojure
+  (Enumerable/Where)
+  ; info/eldoc 会返回参数列表与成员类型
+  ```
+
 ### 安全配置
 
 ```csharp
