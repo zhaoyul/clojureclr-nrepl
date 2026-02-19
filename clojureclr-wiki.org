@@ -57,6 +57,13 @@ ClojureCLR 支持 clojure.org/java_interop 中提到的所有基础互操作函�
   (. s Length)
   ;; => 11
 
+  (.Length s)
+  ;; => 11
+
+  ;;推荐的写法
+  (.-Length s)
+  ;; => 11
+
   ;; 带参数的方法调用 - 两种写法
   (. s (Substring 0 5))
   ;; => "Hello"
@@ -64,8 +71,18 @@ ClojureCLR 支持 clojure.org/java_interop 中提到的所有基础互操作函�
   (. s Substring 0 5)
   ;; => "Hello"
 
+  ;; 推荐的写法
+  (.Substring s 0 5)
+  ;; => "Hello"
+
   ;; 链式调用
   (.. s (Substring 0 5) ToUpper)
+  ;; => "HELLO"
+
+  ;; 也可以
+  (-> s
+      (.Substring 0 5)
+      (.ToUpper))
   ;; => "HELLO"
 #+END_SRC
 
@@ -79,12 +96,13 @@ ClojureCLR 支持 clojure.org/java_interop 中提到的所有基础互操作函�
   (def sb1 (StringBuilder. "Initial"))
   (def sb2 (new StringBuilder "Initial"))
 
-  (. sb1 ToString)
+  (.ToString sb1)
   ;; => "Initial"
 
   ;; 追加内容
   (.Append sb1 " Text")
-  (. sb1 ToString)
+  ;; => #object[StringBuilder 0xfaaf35 "Initial Text"]
+  (.ToString sb1)
   ;; => "Initial Text"
 #+END_SRC
 
@@ -92,7 +110,7 @@ ClojureCLR 支持 clojure.org/java_interop 中提到的所有基础互操作函�
 
 #+BEGIN_SRC clojure
   ;; 导入一个有可设置字段的类
-  (import 'System.Collections.ArrayList)
+  (import '[System.Collections ArrayList])
 
   (def al (ArrayList. [1 2 3]))
 
@@ -102,8 +120,8 @@ ClojureCLR 支持 clojure.org/java_interop 中提到的所有基础互操作函�
 
   ;; 设置属性值
   ;; 注意：ClojureCLR 中数字默认是 Int64，需要显式转换为 Int32
-  (set! (. sb Capacity) (int 100))
-  (. sb Capacity)
+  (set! (.-Capacity sb) (int 100))
+  (.-Capacity sb)
   ;; => 100
 #+END_SRC
 
@@ -111,7 +129,7 @@ ClojureCLR 支持 clojure.org/java_interop 中提到的所有基础互操作函�
 
 #+BEGIN_SRC clojure
   ;; doto - 对同一对象执行多个操作
-  (doto (StringBuilder.)
+  (-> (StringBuilder.)
     (.Append "Hello")
     (.Append " ")
     (.Append "World")
@@ -229,7 +247,7 @@ ClojureCLR 支持 clojure.org/java_interop 中提到的所有基础互操作函�
   ;; 组合更多值
   (def share-mode (enum-or FileShare/Read FileShare/Write FileShare/Inheritable))
   share-mode
-  ;; => Read, Write, Inheritable
+  ;; => ReadWrite, Inheritable
 #+END_SRC
 
 *** 掩码操作 (enum-and)
@@ -388,27 +406,27 @@ ClojureCLR 提供了几个函数来加载程序集。
 标准 Clojure 允许使用 int、double、float 等符号作为类型提示来引用基本类型。ClojureCLR 扩展了这一点，支持 CLR 中特有的数值类型：
 
 #+BEGIN_SRC clojure
-  ;; CLR 特有的数值类型提示
-  ;; 注意：ClojureCLR 支持 uint/ulong 等扩展类型，但类型提示可能需要完全限定
-  (defn process-uint [^System.UInt32 x]
-    (bit-or x 0xFF))
+  ;; CLR 特有的数值类型
+  ;; 注意：当前 ClojureCLR nREPL 版本中 ^System.UInt32/^System.UInt64 类型提示会编译失败，
+  ;; 可用显式转换保证无符号语义
+  (defn process-uint [x]
+    (bit-or (uint x) 0xFF))
 
-  (defn process-ulong [^System.UInt64 x]
-    (+ x 100))
+  (defn process-ulong [x]
+    (long (+ (ulong x) 100)))
 
   ;; 测试
-  (process-uint (uint 100))
+  (process-uint 100)
   ;; => 255
 
-  (process-ulong (ulong 1000))
+  (process-ulong 1000)
   ;; => 1100
 
-  ;; 数组类型简写 - uints 创建 UInt32 数组
+  ;; 创建 UInt32 数组（当前版本无 uints 辅助函数）
   (defn process-uint-array [arr]
     (alength arr))
 
-  ;; 创建 uint 数组
-  (def uint-arr (uints 1 2 3 4 5))
+  (def uint-arr (into-array System.UInt32 [(uint 1) (uint 2) (uint 3) (uint 4) (uint 5)]))
   (process-uint-array uint-arr)
   ;; => 5
 #+END_SRC
@@ -418,69 +436,78 @@ ClojureCLR 提供了几个函数来加载程序集。
 ClojureCLR 通过垂直线引用机制扩展了符号的读取器语法，用于处理包含特殊字符的 CLR 类型名。
 
 #+BEGIN_SRC clojure
-;; 引用泛型类型的完整示例
-;; System.Collections.Generic.List<int>
-;; 开放式泛型类型导入需要用 |...| 包裹反引号
-(import '|System.Collections.Generic.List`1|)
+  ;; 引用泛型类型的完整示例
+  ;; System.Collections.Generic.List<int>
+  ;; 开放式泛型类型导入需要用 |...| 包裹反引号
+  (import '|System.Collections.Generic.List`1|)
 
-;; 创建泛型 List 实例 - 指定具体类型参数
-(def int-list (|System.Collections.Generic.List`1[System.Int32]|.))
+  ;; 创建泛型 List 实例 - 指定具体类型参数
+  (def int-list (|System.Collections.Generic.List`1[System.Int32]|.))
 
-;; 添加元素
-(.Add int-list 10)
-(.Add int-list 20)
-(.Add int-list 30)
+  ;; 添加元素
+  (.Add int-list 10)
+  (.Add int-list 20)
+  (.Add int-list 30)
 
-;; 转换为序列
-(seq int-list)
-;; => (10 20 30)
+  ;; 转换为序列
+  (seq int-list)
+  ;; => (10 20 30)
 
-;; 获取 Count 属性
-(. int-list Count)
-;; => 3
+  ;; 获取 Count 属性
+  (. int-list Count)
+  ;; => 3
 #+END_SRC
 
 ** 泛型类型引用详解
 
 #+BEGIN_SRC clojure
-;; 引用不同参数数量的泛型类型
-;; Dictionary<TKey, TValue>
-(import '|System.Collections.Generic.Dictionary`2|)
+  ;; 引用不同参数数量的泛型类型
+  ;; Dictionary<TKey, TValue>
+  (import '|System.Collections.Generic.Dictionary`2|)
 
-;; 指定具体类型参数
-(def dict (|System.Collections.Generic.Dictionary`2[System.String,System.Int32]|.))
+  ;; 指定具体类型参数
+  (def dict (new |System.Collections.Generic.Dictionary`2[System.String,System.Int32]|))
 
-;; 使用字典
-(.Add dict "one" 1)
-(.Add dict "two" 2)
-(.Add dict "three" 3)
+  ;; 使用字典
+  (.Add dict "one" 1)
+  (.Add dict "two" 2)
+  (.Add dict "three" 3)
 
-;; 访问元素
-(. dict Item "two")
-;; => 2
+  ;; 访问元素
+  (.get_Item dict "two")
+  ;; => 2
 
-;; 获取键和值
-(seq (.Keys dict))
-;; => ("one" "two" "three")
 
-(seq (.Values dict))
-;; => (1 2 3)
+  ;; 获取键和值
+  (.Keys dict)
+  ;; => ("one" "two" "three")
+
+  (.Values dict)
+  ;; => (1 2 3)
 #+END_SRC
 
 ** 在函数中使用泛型类型
 
 #+BEGIN_SRC clojure
-;; 定义一个处理泛型列表的函数
-(defn sum-list [^|System.Collections.Generic.IList`1[System.Int32]| lst]
-  (reduce + (seq lst)))
+  ;; 定义一个处理泛型列表的函数, 使用类型提示
+  (defn sum-list [^|System.Collections.Generic.IList`1[System.Int32]| lst]
+    (reduce + (seq lst)))
 
-;; 测试
-(def numbers (|System.Collections.Generic.List`1[System.Int32]|.))
-(doseq [n [1 2 3 4 5]]
-  (.Add numbers n))
+  ;; 不实用类型提示
+  (defn sum-list' [lst]
+    (reduce + (seq lst)))
 
-(sum-list numbers)
-;; => 15
+
+  ;; 测试
+  (def numbers (|System.Collections.Generic.List`1[System.Int32]|.))
+  (doseq [n [1 2 3 4 5]]
+    (.Add numbers n))
+
+  (sum-list numbers)
+  ;; => 15
+
+  (sum-list' numbers)
+  ;; => 15
 #+END_SRC
 
 * 调用泛型方法 (Calling Generic Methods)
@@ -490,25 +517,33 @@ ClojureCLR 通过垂直线引用机制扩展了符号的读取器语法，用于
 ClojureCLR 支持泛型方法的自动类型推断。
 
 #+BEGIN_SRC clojure
-;; 导入 System.Linq
-(assembly-load "System.Core")  ; System.Linq 在这个程序集中
-(import 'System.Linq.Enumerable)
+  ;; 导入 System.Linq
+  (assembly-load "System.Core")  ; System.Linq 在这个程序集中
+  (import 'System.Linq.Enumerable)
 
-;; 使用 Where 方法 - 类型自动推断
-(def numbers [1 2 3 4 5 6 7 8 9 10])
-(def evens (Enumerable/Where numbers even?))
-(seq evens)
-;; => (2 4 6 8 10)
+  ;; 使用 Where 方法 - 类型自动推断
+  (def numbers [1 2 3 4 5 6 7 8 9 10])
+  (def evens (Enumerable/Where numbers even?))
+  (seq evens)
+  ;; => (2 4 6 8 10)
 
-;; 使用 Select 进行映射
-(def doubled (Enumerable/Select numbers #(* % 2)))
-(seq doubled)
-;; => (2 4 6 8 10 12 14 16 18 20)
+  ;; 使用 Select 进行映射
+  (def doubled (Enumerable/Select numbers #(* % 2)))
+  (seq doubled)
+  ;; => (2 4 6 8 10 12 14 16 18 20)
 
-;; 获取前5个元素
-(def first5 (Enumerable/Take numbers 5))
-(seq first5)
-;; => (1 2 3 4 5)
+  ;; 获取前5个元素
+  (def first5 (Enumerable/Take numbers 5))
+  (seq first5)
+  ;; => (1 2 3 4 5)
+
+  (-> numbers
+      (Enumerable/Where even?)
+      (Enumerable/Select #(* % 2))
+      (Enumerable/Take 1)
+      seq
+      )
+  ;; => (4)
 #+END_SRC
 
 ** 处理歧义重载
@@ -518,12 +553,12 @@ ClojureCLR 支持泛型方法的自动类型推断。
 #+BEGIN_SRC clojure
 ;; 定义一个支持多个参数数量的函数
 (defn flexible-fn
-  ([x] (inc x))
+  ([x] (even? x))
   ([x y] (+ x y)))
 
 ;; 以下会因歧义而失败
-;; (Enumerable/Where [1 2 3 4 5] flexible-fn)
-;; => ArgumentTypeException
+(Enumerable/Where [1 2 3 4 5] flexible-fn)
+;; => #error {:message "Multiple targets could match: Where(IEnumerable`1, Func`2), Where(IEnumerable`1, Func`3)"}
 #+END_SRC
 
 ** 解决方案 1：使用匿名函数
@@ -532,7 +567,7 @@ ClojureCLR 支持泛型方法的自动类型推断。
 ;; 通过匿名函数明确参数数量
 (def filtered (Enumerable/Where [1 2 3 4 5] #(flexible-fn %)))
 (seq filtered)
-;; => (2 3 4 5 6)
+;; => (2 4)
 #+END_SRC
 
 ** 解决方案 2：使用 sys-func 和 sys-action
@@ -599,8 +634,8 @@ ClojureCLR 支持泛型方法的自动类型推断。
 (Enumerable/Min numbers)
 ;; => 1
 
-;; 计数
-(Enumerable/Count numbers)
+;; 计数（需要显式类型参数）
+(Enumerable/Count (type-args Int32) numbers)
 ;; => 5
 #+END_SRC
 
@@ -610,51 +645,47 @@ ClojureCLR 实现了所有 Clojure 的类型定义方法，并扩展支持 CLR �
 
 ** ByRef 参数示例
 
+当前 ClojureCLR nREPL 版本中，`by-ref` 在 `definterface`/`deftype` 中会编译失败，以下仅作语法参考（不建议在 REPL 直接执行）：
+
 #+BEGIN_SRC clojure
-;; 定义一个接口，包含 ByRef 方法
-(definterface IByRefExample
-  (^void swap-values [(by-ref ^int a) (by-ref ^int b)]))
-
-;; 实现这个接口
-(deftype ByRefExample []
-  IByRefExample
-  (^void swap-values [this (by-ref ^int a) (by-ref ^int b)]
-    (let [temp a]
-      (set! a b)
-      (set! b temp))))
-
-;; 注意：实际调用 ByRef 方法需要特殊处理
+;; (definterface IByRefExample
+;;   (^void swap-values [(by-ref ^int a) (by-ref ^int b)]))
+;;
+;; (deftype ByRefExample []
+;;   IByRefExample
+;;   (^void swap-values [this (by-ref ^int a) (by-ref ^int b)]
+;;     (let [temp a]
+;;       (set! a b)
+;;       (set! b temp))))
 #+END_SRC
 
-** 显式接口实现完整示例
+** 多接口实现示例（显式接口语法当前版本不支持）
 
 #+BEGIN_SRC clojure
-;; 定义两个有相同方法签名的接口
+;; 注意：`user.IProcessor.calculate` 这种显式接口实现语法当前版本会编译失败
+;; 可用不同方法名实现多个接口：
 (definterface ICalculator
-  (^Int32 calculate [^Int32 x]))
+  (^Int32 calc2 [^Int32 x]))
 
 (definterface IProcessor
-  (^Int32 calculate [^Int32 x]))
+  (^Int32 proc2 [^Int32 x]))
 
-;; 实现类 - 使用显式接口实现
 (deftype DualService []
   ICalculator
-  (^Int32 calculate [this ^Int32 x]
+  (^Int32 calc2 [this ^Int32 x]
     (* x 2))  ; ICalculator 的实现：乘以 2
 
   IProcessor
-  (^Int32 user.IProcessor.calculate [this ^Int32 x]  ; 显式实现
+  (^Int32 proc2 [this ^Int32 x]
     (+ x 10)))  ; IProcessor 的实现：加 10
 
 ;; 测试
 (def service (DualService.))
 
-;; 默认调用 ICalculator 的实现
-(.calculate service 5)
+(.calc2 service 5)
 ;; => 10
 
-;; 通过类型提示调用 IProcessor 的实现
-(.calculate ^user.IProcessor service 5)
+(.proc2 service 5)
 ;; => 15
 #+END_SRC
 
@@ -768,21 +799,23 @@ ClojureCLR 实现了所有 Clojure 的类型定义方法，并扩展支持 CLR �
       (str "DataEventArgs[data=" (:data (DataEventArgs. "test")) "]"))))
 #+END_SRC
 
-** gen-interface 完整示例
+** gen-interface 示例（当前版本需 AOT，REPL 中不可直接使用）
+
+当前 ClojureCLR nREPL 环境中，`gen-interface` 生成的接口无法直接在 REPL 内被 `deftype` 使用。
+下面用 `definterface` 给出等价可执行示例：
 
 #+BEGIN_SRC clojure
-;; 生成新的接口
-(gen-interface
-  :name IValidator
-  :methods [[validate [Object] Boolean]
-            [getErrorMessage [] String]])
+;; 定义接口
+(definterface IValidator
+  (^Boolean validate [^String value])
+  (^String getErrorMessage []))
 
-;; 使用生成的接口
+;; 实现接口
 (deftype StringValidator [^Int32 minLength]
   IValidator
-  (validate [this ^String value]
+  (^Boolean validate [this ^String value]
     (>= (.Length value) minLength))
-  (getErrorMessage [this]
+  (^String getErrorMessage [this]
     (str "String must be at least " minLength " characters long")))
 
 ;; 测试
@@ -827,17 +860,17 @@ ClojureCLR 实现了所有 Clojure 的类型定义方法，并扩展支持 CLR �
 (def rect (ResizableRectangle. 10.0 5.0))
 
 (.ToString rect)
-;; => "ResizableRectangle[10.0x5.0]"
+;; => "ResizableRectangle[10x5]"
 
 ;; 缩放
 (scale rect 2.0)
 (.ToString rect)
-;; => "ResizableRectangle[20.0x10.0]"
+;; => "ResizableRectangle[20x10]"
 
 ;; 调整大小
 (resize rect 100.0 50.0)
 (.ToString rect)
-;; => "ResizableRectangle[100.0x50.0]"
+;; => "ResizableRectangle[100x50]"
 #+END_SRC
 
 * 学习建议
@@ -849,7 +882,7 @@ ClojureCLR 实现了所有 Clojure 的类型定义方法，并扩展支持 CLR �
    - 泛型类型的语法
 3. 尝试修改示例代码，观察不同参数的影响
 4. 练习使用 sys-func 和 type-args 解决泛型方法调用问题
-5. 实践显式接口实现和 ByRef 参数的使用
+5. 实践多接口实现、协议和泛型方法调用（注意部分高级语法需要 AOT 才能在 REPL 使用）
 
 * 参考链接
 
