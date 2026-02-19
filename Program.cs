@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using clojure.lang;
@@ -599,11 +600,57 @@ namespace clojureCLR_nrepl
         {
             var id = GetId(request);
             var code = request.GetValueOrDefault("code") as string;
+            var nsParam = request.GetValueOrDefault("ns") as string;
 
             Console.WriteLine($"Evaluating: {code}");
 
             try
             {
+                // If client provides ns, honor it for this session
+                if (!string.IsNullOrEmpty(nsParam) && session != null)
+                {
+                    try
+                    {
+                        var findNs = RT.var("clojure.core", "find-ns");
+                        var ns = findNs.invoke(Symbol.create(nsParam)) as Namespace;
+                        if (ns == null)
+                        {
+                            // Try require first
+                            try
+                            {
+                                var require = RT.var("clojure.core", "require");
+                                require.invoke(Symbol.create(nsParam));
+                                ns = findNs.invoke(Symbol.create(nsParam)) as Namespace;
+                            }
+                            catch { }
+
+                            if (ns == null)
+                            {
+                                ns = Namespace.findOrCreate(Symbol.create(nsParam));
+                            }
+                        }
+
+                        // Ensure clojure.core is referred for usability
+                        try
+                        {
+                            var refer = RT.var("clojure.core", "refer");
+                            Var.pushThreadBindings(RT.map(RT.CurrentNSVar, ns));
+                            try
+                            {
+                                refer.invoke(Symbol.create("clojure.core"));
+                            }
+                            finally
+                            {
+                                Var.popThreadBindings();
+                            }
+                        }
+                        catch { }
+
+                        session.CurrentNamespace = ns;
+                    }
+                    catch { }
+                }
+
                 var result = EvaluateClojure(code, session);
                 Console.WriteLine($"Result: {result}");
                 var currentNs = session?.CurrentNamespace ?? RT.CurrentNSVar.deref() as Namespace;
@@ -859,8 +906,17 @@ namespace clojureCLR_nrepl
         private void HandleComplete(NetworkStream stream, Dictionary<string, object> request, string sessionId, bool useLengthPrefix, Session session)
         {
             var id = GetId(request);
-            var prefix = request.GetValueOrDefault("symbol") as string ?? "";
+            var prefix = request.GetValueOrDefault("symbol") as string
+                ?? request.GetValueOrDefault("prefix") as string
+                ?? request.GetValueOrDefault("sym") as string
+                ?? request.GetValueOrDefault("text") as string
+                ?? "";
             var nsName = request.GetValueOrDefault("ns") as string;
+
+            if (string.IsNullOrEmpty(prefix))
+            {
+                prefix = ExtractPrefixFromRequest(request);
+            }
 
             Console.WriteLine($"Complete request: prefix='{prefix}', ns='{nsName}'");
 
@@ -977,6 +1033,21 @@ namespace clojureCLR_nrepl
                 var alias = parts[0];
                 var varPrefix = parts[1].ToLowerInvariant();
 
+                // Try static member completions for CLR types (e.g., Enumerable/Where)
+                try
+                {
+                    var resolvedType = TryResolveType(ns, alias);
+                    if (resolvedType == null && session?.CurrentNamespace != null && session.CurrentNamespace != ns)
+                    {
+                        resolvedType = TryResolveType(session.CurrentNamespace, alias);
+                    }
+                    if (resolvedType != null)
+                    {
+                        AddTypeCompletions(completions, alias, varPrefix, resolvedType);
+                    }
+                }
+                catch { }
+
                 // Try to find the aliased namespace
                 Namespace aliasedNs = null;
                 try
@@ -1073,6 +1144,168 @@ namespace clojureCLR_nrepl
                 string.Compare(a["candidate"].ToString(), b["candidate"].ToString(), StringComparison.Ordinal));
 
             return completions;
+        }
+
+        private Type TryResolveType(Namespace ns, string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+
+            // Try resolving from current namespace (imported types)
+            try
+            {
+                var nsResolve = RT.var("clojure.core", "ns-resolve");
+                var resolved = nsResolve.invoke(ns, Symbol.create(name));
+                if (resolved is Type t) return t;
+                if (resolved is Var v)
+                {
+                    var val = v.deref();
+                    if (val is Type vt) return vt;
+                }
+            }
+            catch { }
+
+            // Try full name lookup
+            try
+            {
+                var t = Type.GetType(name, false);
+                if (t != null) return t;
+            }
+            catch { }
+
+            // Search loaded assemblies
+            try
+            {
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    var t = asm.GetType(name, false, false);
+                    if (t != null) return t;
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private void AddTypeCompletions(List<Dictionary<string, object>> completions, string typeAlias, string memberPrefixLower, Type type)
+        {
+            var flags = BindingFlags.Public | BindingFlags.Static;
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                foreach (var method in type.GetMethods(flags))
+                {
+                    if (method.IsSpecialName) continue; // skip get_/set_/op_*
+                    var name = method.Name;
+                    if (!name.ToLowerInvariant().StartsWith(memberPrefixLower)) continue;
+                    if (!seen.Add(name)) continue;
+
+                    completions.Add(new Dictionary<string, object>
+                    {
+                        ["candidate"] = $"{typeAlias}/{name}",
+                        ["type"] = "method",
+                        ["ns"] = type.FullName ?? typeAlias,
+                        ["doc"] = ""
+                    });
+                }
+
+                foreach (var prop in type.GetProperties(flags))
+                {
+                    var name = prop.Name;
+                    if (!name.ToLowerInvariant().StartsWith(memberPrefixLower)) continue;
+                    if (!seen.Add(name)) continue;
+
+                    completions.Add(new Dictionary<string, object>
+                    {
+                        ["candidate"] = $"{typeAlias}/{name}",
+                        ["type"] = "property",
+                        ["ns"] = type.FullName ?? typeAlias,
+                        ["doc"] = ""
+                    });
+                }
+
+                foreach (var field in type.GetFields(flags))
+                {
+                    var name = field.Name;
+                    if (!name.ToLowerInvariant().StartsWith(memberPrefixLower)) continue;
+                    if (!seen.Add(name)) continue;
+
+                    completions.Add(new Dictionary<string, object>
+                    {
+                        ["candidate"] = $"{typeAlias}/{name}",
+                        ["type"] = "field",
+                        ["ns"] = type.FullName ?? typeAlias,
+                        ["doc"] = ""
+                    });
+                }
+            }
+            catch { }
+        }
+
+        private string ExtractPrefixFromRequest(Dictionary<string, object> request)
+        {
+            // Try to derive prefix from line/buffer + cursor position
+            var line = request.GetValueOrDefault("line") as string;
+            var buffer = request.GetValueOrDefault("buffer") as string
+                ?? request.GetValueOrDefault("code") as string
+                ?? request.GetValueOrDefault("text") as string;
+
+            int? pos = TryGetInt(request, "pos")
+                ?? TryGetInt(request, "cursor")
+                ?? TryGetInt(request, "cursor-pos")
+                ?? TryGetInt(request, "column");
+
+            if (!string.IsNullOrEmpty(line))
+            {
+                var slice = line;
+                if (pos.HasValue)
+                {
+                    var p = Math.Max(0, Math.Min(pos.Value, line.Length));
+                    slice = line.Substring(0, p);
+                }
+                return ExtractToken(slice);
+            }
+
+            if (!string.IsNullOrEmpty(buffer))
+            {
+                var slice = buffer;
+                if (pos.HasValue)
+                {
+                    var p = Math.Max(0, Math.Min(pos.Value, buffer.Length));
+                    slice = buffer.Substring(0, p);
+                }
+                return ExtractToken(slice);
+            }
+
+            return "";
+        }
+
+        private int? TryGetInt(Dictionary<string, object> request, string key)
+        {
+            if (!request.TryGetValue(key, out var val) || val == null) return null;
+            try
+            {
+                if (val is int i) return i;
+                if (val is long l) return (int)l;
+                if (val is string s && int.TryParse(s, out var si)) return si;
+            }
+            catch { }
+            return null;
+        }
+
+        private string ExtractToken(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            int i = s.Length - 1;
+            while (i >= 0 && IsTokenChar(s[i])) i--;
+            return s.Substring(i + 1);
+        }
+
+        private bool IsTokenChar(char c)
+        {
+            return char.IsLetterOrDigit(c) || c == '_' || c == '-' || c == '+' || c == '*'
+                || c == '?' || c == '!' || c == '$' || c == '<' || c == '>' || c == '='
+                || c == '.' || c == ':' || c == '/' || c == '\\' || c == '\'';
         }
 
         private string GetFullNamespaceName(string shorthand)
