@@ -16,6 +16,11 @@
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'">
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- ClojureCLR 核心库 -->
     <PackageReference Include="Clojure" Version="1.12.2" />
@@ -29,6 +34,7 @@
   <ItemGroup>
     <Compile Remove="cli/**" />
     <Compile Remove="tests/**" />
+    <Compile Remove="demo/**" />
   </ItemGroup>
 
 </Project>

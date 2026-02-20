@@ -27,6 +27,8 @@ coverage/
 # NuGet
 *.nupkg
 packages/
+nupkgs/
+.tmp/
 
 # Logs
 *.log

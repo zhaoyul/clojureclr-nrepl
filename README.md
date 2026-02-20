@@ -18,6 +18,21 @@ dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 
 服务器将在 `127.0.0.1:1667` 启动。
 
+### Demo（ClojureCLR + core.async）
+
+```bash
+./tools/build_core_async_local.sh
+dotnet run --project demo/clojureclr-demo.csproj
+```
+
+注意：`clojure.core.async` 在 CLR 上依赖 `clojure.tools.analyzer.clr`。demo 项目已内置该依赖；如果你在自己的项目里使用 core.async，请一并引用。
+
+运行后会：
+1. 启动内置 nREPL server
+2. `load-file` 加载 `demo/src/demo/core.clj`
+3. 加载已打补丁的 `clojure.core.async`
+4. 执行 `demo.core/run`
+
 详细使用指南：
 - [QUICKSTART.md](./QUICKSTART.md) - 5 分钟快速上手
 - [USAGE.md](./USAGE.md) - 完整使用文档

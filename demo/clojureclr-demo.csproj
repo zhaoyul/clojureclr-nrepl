@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\clojureCLR-nrepl.csproj" />
+    <PackageReference Include="Clojure" Version="1.12.2" />
+    <PackageReference Include="clojure.core.async" Version="1.7.701-clrfix2" />
+    <PackageReference Include="clojure.tools.analyzer.clr" Version="1.3.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="src/demo/core.clj" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
