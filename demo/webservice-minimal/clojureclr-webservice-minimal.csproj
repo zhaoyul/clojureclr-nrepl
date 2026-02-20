@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Clojure" Version="1.12.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="src/demo/minimal.clj" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

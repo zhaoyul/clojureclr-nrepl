@@ -33,6 +33,42 @@ dotnet run --project demo/clojureclr-demo.csproj
 3. 加载已打补丁的 `clojure.core.async`
 4. 执行 `demo.core/run`
 
+### Demo（ClojureCLR Webservice + .NET HttpListener）
+
+使用 Clojure 直接驱动 .NET `HttpListener`，无需额外 C# Web 框架：
+
+```bash
+dotnet run --project demo/webservice/clojureclr-webservice.csproj
+```
+
+默认监听 `http://127.0.0.1:8080/`，可用环境变量覆盖：
+```bash
+WEB_HOST=127.0.0.1 WEB_PORT=8081 dotnet run --project demo/webservice/clojureclr-webservice.csproj
+```
+
+路由示例：
+- `GET /` → `hello from ClojureCLR`
+- `GET /health` → `{"ok":true}`
+- `POST /echo` → 原样返回请求体
+
+### Demo（ClojureCLR Webservice + ASP.NET Core Minimal API）
+
+使用 Kestrel + Minimal API，业务逻辑由 Clojure 实现：
+
+```bash
+dotnet run --project demo/webservice-minimal/clojureclr-webservice-minimal.csproj
+```
+
+默认使用 ASP.NET 的地址配置（`ASPNETCORE_URLS`）。例如：
+```bash
+ASPNETCORE_URLS=http://127.0.0.1:8082 dotnet run --project demo/webservice-minimal/clojureclr-webservice-minimal.csproj
+```
+
+路由示例：
+- `GET /` → `hello from ClojureCLR (minimal api)`
+- `GET /health` → `{"ok":true}`
+- `POST /echo` → 原样返回请求体
+
 详细使用指南：
 - [QUICKSTART.md](./QUICKSTART.md) - 5 分钟快速上手
 - [USAGE.md](./USAGE.md) - 完整使用文档
