@@ -77,10 +77,31 @@ python3 test_nrepl.py
 
 ```
 .
-├── Program.cs              # 主实现（Bencode + nREPL 协议）
-├── clojureCLR-nrepl.csproj # .NET 项目文件
-├── test_nrepl.py           # Python 测试脚本
-└── README.md               # 本文档
+├── src/
+│   ├── BencodeCodec.cs                 # Bencode 编解码
+│   ├── NReplServer.Core.cs             # 连接/协议/消息分发
+│   ├── NReplServer.Eval.cs             # eval 与命名空间切换
+│   ├── NReplServer.SessionHandlers.cs  # clone/ls-sessions/interrupt/load-file
+│   ├── NReplServer.Completion.cs       # 补全入口
+│   ├── NReplServer.Completion.Dot.cs   # 点调用补全
+│   ├── NReplServer.Completion.Cache.cs # 反射缓存
+│   ├── NReplServer.Info.cs             # info 处理
+│   ├── NReplServer.Eldoc.cs            # eldoc 入口
+│   ├── NReplServer.Eldoc.Dot.cs        # 点调用 eldoc
+│   ├── NReplServer.Eldoc.Clr.cs        # CLR 静态成员 eldoc
+│   ├── NReplServer.Utilities.cs        # 通用工具
+│   ├── NReplServer.Parsing.cs          # 补全/eldoc 解析
+│   └── NReplSession.cs                 # 会话模型
+├── cli/
+│   ├── Program.cs                      # CLI 入口
+│   └── clojureCLR-nrepl-cli.csproj     # CLI 项目
+├── tests/
+│   ├── BencodeCodecTests.cs            # 编解码测试
+│   ├── ServerIntegrationTests.cs       # 基本协议测试
+│   └── clojureCLR-nrepl.Tests.csproj   # 测试项目
+├── clojureCLR-nrepl.csproj             # 库项目（NuGet 包）
+├── test_nrepl.py                       # Python 测试脚本
+└── README.md                           # 本文档
 ```
 
 ### 核心组件
@@ -191,6 +212,9 @@ private void HandleNewOp(NetworkStream stream, Dictionary<string, object> reques
 ```bash
 # 运行服务器
 dotnet run --project cli/clojureCLR-nrepl-cli.csproj &
+
+# 运行单元测试
+dotnet test tests/clojureCLR-nrepl.Tests.csproj -c Release
 
 # 运行 Python 测试
 python3 test_nrepl.py

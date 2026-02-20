@@ -28,6 +28,7 @@
 
   <ItemGroup>
     <Compile Remove="cli/**" />
+    <Compile Remove="tests/**" />
   </ItemGroup>
 
 </Project>

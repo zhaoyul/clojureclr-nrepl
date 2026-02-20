@@ -75,13 +75,13 @@ echo 'd2:op5:clone2:id1:1e' | nc localhost 1667
 
 ### 方法 A: 复制源码
 
-将 `Program.cs` 中的相关类复制到你的项目中：
+将 `src/` 目录中的源码复制到你的项目中：
 
 ```csharp
 // 在你的项目中添加以下类:
-// - Bencode (编解码)
+// - BencodeCodec (编解码)
 // - NReplServer (服务器)
-// - Session (会话)
+// - NReplSession (会话)
 
 // 然后启动服务器
 var server = new NReplServer("127.0.0.1", 1667);
@@ -95,7 +95,7 @@ server.Start();
 ```bash
 # 修改 .csproj 为类库
 dotnet new classlib -n ClojureCLR.NRepl -o ./nrepl-lib
-cp Program.cs ./nrepl-lib/
+cp -R src ./nrepl-lib/
 
 # 修改输出类型
 # <OutputType>Library</OutputType>
@@ -254,8 +254,6 @@ public class ClojureNReplService : ServiceBase
 ## 4. 配置选项
 
 ### 命令行参数
-
-修改 `Program.cs` 支持命令行参数：
 
 CLI 使用环境变量配置：
 
@@ -430,9 +428,7 @@ app.MapGet("/health", () => new {
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 复制 Program.cs 到项目 -->
-    <Compile Include="../clojureCLR-nrepl/Program.cs" />
-    <PackageReference Include="Clojure" Version="1.11.0" />
+    <ProjectReference Include="../clojureCLR-nrepl/clojureCLR-nrepl.csproj" />
   </ItemGroup>
 </Project>
 ```

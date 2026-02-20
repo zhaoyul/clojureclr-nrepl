@@ -11,7 +11,7 @@ build:
 
 # 运行服务器
 run:
-	dotnet run --project clojureCLR-nrepl.csproj
+	dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 
 # 发布 Release
 release:
@@ -19,10 +19,12 @@ release:
 
 # 运行测试
 test: build
+	@echo "Running unit tests..."
+	@dotnet test tests/clojureCLR-nrepl.Tests.csproj -c Release
 	@echo "Starting server..."
-	@dotnet run --project clojureCLR-nrepl.csproj &
+	@dotnet run --project cli/clojureCLR-nrepl-cli.csproj &
 	@sleep 3
-	@echo "Running tests..."
+	@echo "Running integration tests..."
 	@python3 test_nrepl.py || true
 	@echo "Stopping server..."
 	@lsof -ti:1667 | xargs kill -9 2>/dev/null || true
@@ -49,7 +51,7 @@ lint:
 # 启动测试服务器并后台运行
 dev:
 	@echo "Starting development server..."
-	@dotnet run --project clojureCLR-nrepl.csproj &
+	@dotnet run --project cli/clojureCLR-nrepl-cli.csproj &
 	@echo "Server PID: $$!"
 	@echo "Connect with: M-x cider-connect-clj (127.0.0.1:1667)"
 
