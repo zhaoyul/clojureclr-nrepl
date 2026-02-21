@@ -1,4 +1,5 @@
 (ns demo.run-webservice-minimal
+  (:require [clojure.string :as str])
   (:import [System Environment Console]
            [System.IO Directory DirectoryInfo FileInfo Path StreamReader]
            [System.Reflection Assembly]
@@ -81,6 +82,19 @@
   (with-open [sr (StreamReader. (.Body req) Encoding/UTF8)]
     (.. sr ReadToEndAsync GetAwaiter GetResult)))
 
+(defn- nrepl-enabled? [default-on?]
+  (let [raw (Environment/GetEnvironmentVariable "NREPL_ENABLE")]
+    (if (nil? raw)
+      default-on?
+      (contains? #{"1" "true" "yes" "on"} (str/lower-case raw)))))
+
+(defn- parse-int [s default]
+  (try
+    (int (System.Int32/Parse s))
+    (catch Exception _ default)))
+
+(defonce ^:private nrepl* (atom nil))
+
 (defn- respond-text [ctx status body content-type]
   (let [resp (.Response ctx)]
     (set! (.StatusCode resp) (int status))
@@ -99,9 +113,29 @@
   (load-aspnet-assemblies!)
 
   (let [root (repo-root)
+        nrepl-util-file (combine-path root "demo" "nrepl_util.clj")
         clj-file (combine-path root "demo" "webservice-minimal" "src" "demo" "minimal.clj")]
+    (clojure.core/load-file nrepl-util-file)
+    (require 'demo.nrepl-util)
     (clojure.core/load-file clj-file))
   (require 'demo.minimal)
+
+  (let [start-nrepl (ns-resolve 'demo.nrepl-util 'start-nrepl!)
+        stop-nrepl (ns-resolve 'demo.nrepl-util 'stop-nrepl!)]
+    (when (nil? start-nrepl)
+      (throw (ex-info "Cannot resolve demo.nrepl-util/start-nrepl!" {})))
+    (when (nil? stop-nrepl)
+      (throw (ex-info "Cannot resolve demo.nrepl-util/stop-nrepl!" {})))
+    (when (nrepl-enabled? false)
+      (let [host (or (Environment/GetEnvironmentVariable "NREPL_HOST") "127.0.0.1")
+            port (parse-int (or (Environment/GetEnvironmentVariable "NREPL_PORT") "1667") 1667)
+            server (start-nrepl root host port)]
+        (reset! nrepl* server)
+        (println (str "nREPL server started on " host ":" port))
+        (println "Connect using:")
+        (println (str "  lein repl :connect " host ":" port))
+        (println "  Calva: Connect to Running nREPL Server")
+        (println "  CIDER: cider-connect-clj")))
 
   (let [webapp-type (find-type "Microsoft.AspNetCore.Builder.WebApplication")
         builder-m (method-by webapp-type "CreateBuilder"
@@ -161,4 +195,6 @@
       (println "Press Enter to stop...")
       (Console/ReadLine)
       (when stop-async-m
-        (.Invoke stop-async-m app (object-array [(System.Threading.CancellationToken/None)]))))))
+        (.Invoke stop-async-m app (object-array [(System.Threading.CancellationToken/None)])))
+      (when-let [server @nrepl*]
+        (stop-nrepl server))))))

@@ -37,6 +37,7 @@ clojure -i demo/run-core.clj -e "(demo.run-core/-main)"
 ```
 
 可选环境变量：
+- `NREPL_ENABLE`（默认开启；设为 `0`/`false` 可禁用）
 - `NREPL_HOST`（默认 `127.0.0.1`）
 - `NREPL_PORT`（默认 `1667`）
 
@@ -63,6 +64,11 @@ clojure -i demo/run-webservice.clj -e "(demo.run-webservice/-main)"
 WEB_HOST=127.0.0.1 WEB_PORT=8081 clojure -i demo/run-webservice.clj -e "(demo.run-webservice/-main)"
 ```
 
+可选开启 nREPL（默认关闭）：
+```bash
+NREPL_ENABLE=1 NREPL_PORT=1667 clojure -i demo/run-webservice.clj -e "(demo.run-webservice/-main)"
+```
+
 路由示例：
 - `GET /` → `hello from ClojureCLR`
 - `GET /health` → `{"ok":true}`
@@ -80,6 +86,11 @@ dotnet restore demo/specter-demo/specter-demo.csproj
 clojure -i demo/run-specter.clj -e "(demo.run-specter/-main)"
 ```
 
+可选开启 nREPL（默认关闭）：
+```bash
+NREPL_ENABLE=1 NREPL_PORT=1667 clojure -i demo/run-specter.clj -e "(demo.run-specter/-main)"
+```
+
 ### Demo（Clojure-only Minimal API）
 
 使用 ASP.NET Core Minimal API，入口与路由均为 Clojure 代码：
@@ -93,10 +104,23 @@ clojure -i demo/run-webservice-minimal.clj -e "(demo.run-webservice-minimal/-mai
 ASPNETCORE_URLS=http://127.0.0.1:8082 clojure -i demo/run-webservice-minimal.clj -e "(demo.run-webservice-minimal/-main)"
 ```
 
+可选开启 nREPL（默认关闭）：
+```bash
+NREPL_ENABLE=1 NREPL_PORT=1667 clojure -i demo/run-webservice-minimal.clj -e "(demo.run-webservice-minimal/-main)"
+```
+
 路由示例：
 - `GET /` → `hello from ClojureCLR (minimal api)`
 - `GET /health` → `{"ok":true}`
 - `POST /echo` → 原样返回请求体
+
+### 最简 REPL 起点
+
+只启动 nREPL，适合作为所有项目的起点：
+
+```bash
+clojure -i demo/run-repl-only.clj -e "(demo.run-repl-only/-main)"
+```
 
 详细使用指南：
 - [QUICKSTART.md](./QUICKSTART.md) - 5 分钟快速上手
@@ -179,6 +203,13 @@ python3 test_nrepl.py
 │   ├── BencodeCodecTests.cs            # 编解码测试
 │   ├── ServerIntegrationTests.cs       # 基本协议测试
 │   └── clojureCLR-nrepl.Tests.csproj   # 测试项目
+├── demo/
+│   ├── run-core.clj                    # core.async + nREPL demo
+│   ├── run-specter.clj                 # Specter demo
+│   ├── run-webservice.clj              # HttpListener demo
+│   ├── run-webservice-minimal.clj      # Minimal API demo
+│   ├── run-repl-only.clj               # 最简 nREPL 起点
+│   └── nrepl_util.clj                  # nREPL 启停工具
 ├── clojureCLR-nrepl.csproj             # 库项目（NuGet 包）
 ├── test_nrepl.py                       # Python 测试脚本
 └── README.md                           # 本文档

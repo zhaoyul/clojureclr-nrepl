@@ -1,4 +1,5 @@
 (ns demo.run-webservice
+  (:require [clojure.string :as str])
   (:import [System Environment Console]
            [System.IO Directory FileInfo Path]
            [System.Reflection Assembly]
@@ -42,10 +43,21 @@
     (int (System.Int32/Parse s))
     (catch Exception _ default)))
 
+(defn- nrepl-enabled? [default-on?]
+  (let [raw (Environment/GetEnvironmentVariable "NREPL_ENABLE")]
+    (if (nil? raw)
+      default-on?
+      (contains? #{"1" "true" "yes" "on"} (str/lower-case raw)))))
+
+(defonce ^:private nrepl* (atom nil))
+
 (defn -main [& _]
   (load-runtime-assembly! "System.Net.HttpListener")
   (let [root (repo-root)
+        nrepl-util-file (combine-path root "demo" "nrepl_util.clj")
         web-file (combine-path root "demo" "webservice" "src" "demo" "web.clj")]
+    (clojure.core/load-file nrepl-util-file)
+    (require 'demo.nrepl-util)
     (clojure.core/load-file web-file))
   (require 'demo.web)
   (let [host (or (Environment/GetEnvironmentVariable "WEB_HOST") "127.0.0.1")
@@ -56,10 +68,28 @@
       (throw (ex-info "Cannot resolve demo.web/start!" {})))
     (when (nil? stop-var)
       (throw (ex-info "Cannot resolve demo.web/stop!" {})))
+    (let [start-nrepl (ns-resolve 'demo.nrepl-util 'start-nrepl!)
+          stop-nrepl (ns-resolve 'demo.nrepl-util 'stop-nrepl!)]
+      (when (nil? start-nrepl)
+        (throw (ex-info "Cannot resolve demo.nrepl-util/start-nrepl!" {})))
+      (when (nil? stop-nrepl)
+        (throw (ex-info "Cannot resolve demo.nrepl-util/stop-nrepl!" {})))
+      (when (nrepl-enabled? false)
+        (let [nrepl-host (or (Environment/GetEnvironmentVariable "NREPL_HOST") "127.0.0.1")
+              nrepl-port (parse-int (or (Environment/GetEnvironmentVariable "NREPL_PORT") "1667") 1667)
+              server (start-nrepl root nrepl-host nrepl-port)]
+          (reset! nrepl* server)
+          (println (str "nREPL server started on " nrepl-host ":" nrepl-port))
+          (println "Connect using:")
+          (println (str "  lein repl :connect " nrepl-host ":" nrepl-port))
+          (println "  Calva: Connect to Running nREPL Server")
+          (println "  CIDER: cider-connect-clj")))
     (try
       (start-var host port)
       (println (str "webservice running on http://" host ":" port "/"))
       (println "Press Enter to stop...")
       (Console/ReadLine)
       (finally
-        (stop-var)))))
+        (stop-var)
+        (when-let [server @nrepl*]
+          (stop-nrepl server)))))))

@@ -1,6 +1,6 @@
 (ns demo.run-core
   (:require [clojure.string :as str])
-  (:import [System Environment Console Activator]
+  (:import [System Environment Console]
            [System.IO Directory FileInfo Path]
            [System.Reflection Assembly]))
 
@@ -42,57 +42,65 @@
         path (combine-path root package-id version "lib" "netstandard2.0" assembly-name)]
     (load-assembly! path)))
 
-(defn- load-local-assembly! [relative-paths]
-  (let [root (repo-root)
-        candidates (map #(Path/Combine root %) relative-paths)
-        existing (first (filter #(.Exists (FileInfo. %)) candidates))]
-    (when-not existing
-      (throw (ex-info "Local assembly not found" {:candidates candidates})))
-    (load-assembly! existing)))
+(defn- nrepl-enabled? [default-on?]
+  (let [raw (Environment/GetEnvironmentVariable "NREPL_ENABLE")]
+    (if (nil? raw)
+      default-on?
+      (contains? #{"1" "true" "yes" "on"} (str/lower-case raw)))))
 
 (defn- parse-int [s default]
   (try
     (int (System.Int32/Parse s))
     (catch Exception _ default)))
 
+(defonce ^:private nrepl* (atom nil))
+
 (defn -main [& _]
   (try
-    ;; Load local nREPL server assembly (build output)
-    (let [nrepl-asm (load-local-assembly!
-                      ["bin/Debug/net8.0/clojureCLR-nrepl.dll"
-                       "bin/Release/net8.0/clojureCLR-nrepl.dll"])
-          nrepl-type (.GetType nrepl-asm "clojureCLR_nrepl.NReplServer")]
-      (when (nil? nrepl-type)
-        (throw (ex-info "Type not found: clojureCLR_nrepl.NReplServer" {})))
+    (let [root (repo-root)
+          nrepl-util-file (combine-path root "demo" "nrepl_util.clj")
+          core-file (combine-path root "demo" "src" "demo" "core.clj")]
+      (clojure.core/load-file nrepl-util-file)
+      (require 'demo.nrepl-util)
+      (let [start-nrepl (ns-resolve 'demo.nrepl-util 'start-nrepl!)
+            stop-nrepl (ns-resolve 'demo.nrepl-util 'stop-nrepl!)]
+        (when (nil? start-nrepl)
+          (throw (ex-info "Cannot resolve demo.nrepl-util/start-nrepl!" {})))
+        (when (nil? stop-nrepl)
+          (throw (ex-info "Cannot resolve demo.nrepl-util/stop-nrepl!" {})))
 
-      ;; Load NuGet assemblies for core.async and its analyzer dependency
-      (load-package-assembly! "clojure.tools.analyzer" "1.1.1" "clojure.tools.analyzer.dll")
-      (load-package-assembly! "clojure.tools.reader" "1.3.7" "clojure.tools.reader.dll")
-      (load-package-assembly! "clojure.data.priority-map" "1.2.0" "clojure.data.priority-map.dll")
-      (load-package-assembly! "clojure.core.cache" "1.1.234" "clojure.core.cache.dll")
-      (load-package-assembly! "clojure.core.memoize" "1.1.266" "clojure.core.memoize.dll")
-      (load-package-assembly! "clojure.tools.analyzer.clr" "1.3.2" "clojure.tools.analyzer.clr.dll")
-      (load-package-assembly! "clojure.core.async.clrfix" "1.7.701-clrfix2" "clojure.core.async.dll")
+        ;; Load NuGet assemblies for core.async and its analyzer dependency
+        (load-package-assembly! "clojure.tools.analyzer" "1.1.1" "clojure.tools.analyzer.dll")
+        (load-package-assembly! "clojure.tools.reader" "1.3.7" "clojure.tools.reader.dll")
+        (load-package-assembly! "clojure.data.priority-map" "1.2.0" "clojure.data.priority-map.dll")
+        (load-package-assembly! "clojure.core.cache" "1.1.234" "clojure.core.cache.dll")
+        (load-package-assembly! "clojure.core.memoize" "1.1.266" "clojure.core.memoize.dll")
+        (load-package-assembly! "clojure.tools.analyzer.clr" "1.3.2" "clojure.tools.analyzer.clr.dll")
+        (load-package-assembly! "clojure.core.async.clrfix" "1.7.701-clrfix2" "clojure.core.async.dll")
 
       ;; Load demo code
-      (let [root (repo-root)
-            core-file (combine-path root "demo" "src" "demo" "core.clj")]
-        (clojure.core/load-file core-file))
-
+      (clojure.core/load-file core-file)
       (require 'demo.core)
 
-      (let [host (or (Environment/GetEnvironmentVariable "NREPL_HOST") "127.0.0.1")
-            port (parse-int (or (Environment/GetEnvironmentVariable "NREPL_PORT") "1667") 1667)
-            server (Activator/CreateInstance nrepl-type (object-array [host port]))]
-        (.Invoke (.GetMethod nrepl-type "Start") server (object-array []))
-        (println (str "nREPL server started on " host ":" port))
-        (let [run-var (ns-resolve 'demo.core 'run)]
-          (when (nil? run-var)
-            (throw (ex-info "Cannot resolve demo.core/run" {})))
-          (println (str "demo.core/run => " (run-var))))
-        (println "Press Enter to stop...")
-        (Console/ReadLine)
-        (.Invoke (.GetMethod nrepl-type "Stop") server (object-array []))))
+        (when (nrepl-enabled? true)
+          (let [host (or (Environment/GetEnvironmentVariable "NREPL_HOST") "127.0.0.1")
+                port (parse-int (or (Environment/GetEnvironmentVariable "NREPL_PORT") "1667") 1667)
+                server (start-nrepl root host port)]
+            (reset! nrepl* server)
+            (println (str "nREPL server started on " host ":" port))
+            (println "Connect using:")
+            (println (str "  lein repl :connect " host ":" port))
+            (println "  Calva: Connect to Running nREPL Server")
+            (println "  CIDER: cider-connect-clj")))
+
+      (let [run-var (ns-resolve 'demo.core 'run)]
+        (when (nil? run-var)
+          (throw (ex-info "Cannot resolve demo.core/run" {})))
+        (println (str "demo.core/run => " (run-var))))
+      (println "Press Enter to stop...")
+      (Console/ReadLine)
+        (when-let [server @nrepl*]
+          (stop-nrepl server)))))
     (catch Exception ex
       (println (str "ERROR: " (.Message ex)))
       (println (.ToString ex)))))

@@ -1,4 +1,5 @@
 (ns demo.run-specter
+  (:require [clojure.string :as str])
   (:import [System Environment]
            [System.IO Directory FileInfo Path]
            [System.Reflection Assembly]))
@@ -41,13 +42,50 @@
         path (combine-path root package-id version "lib" "netstandard2.0" assembly-name)]
     (load-assembly! path)))
 
+(defn- nrepl-enabled? [default-on?]
+  (let [raw (Environment/GetEnvironmentVariable "NREPL_ENABLE")]
+    (if (nil? raw)
+      default-on?
+      (contains? #{"1" "true" "yes" "on"} (str/lower-case raw)))))
+
+(defn- parse-int [s default]
+  (try
+    (int (System.Int32/Parse s))
+    (catch Exception _ default)))
+
+(defonce ^:private nrepl* (atom nil))
+
 (defn -main [& _]
-  (load-package-assembly! "com.rpl.specter.clr" "1.1.7-clrfix1" "com.rpl.specter.dll")
   (let [root (repo-root)
+        nrepl-util-file (combine-path root "demo" "nrepl_util.clj")
         specter-file (combine-path root "demo" "specter-demo" "src" "demo" "specter.clj")]
-    (clojure.core/load-file specter-file))
+    (clojure.core/load-file nrepl-util-file)
+    (require 'demo.nrepl-util)
+    (let [start-nrepl (ns-resolve 'demo.nrepl-util 'start-nrepl!)
+          stop-nrepl (ns-resolve 'demo.nrepl-util 'stop-nrepl!)]
+      (when (nil? start-nrepl)
+        (throw (ex-info "Cannot resolve demo.nrepl-util/start-nrepl!" {})))
+      (when (nil? stop-nrepl)
+        (throw (ex-info "Cannot resolve demo.nrepl-util/stop-nrepl!" {})))
+      (when (nrepl-enabled? false)
+        (let [host (or (Environment/GetEnvironmentVariable "NREPL_HOST") "127.0.0.1")
+              port (parse-int (or (Environment/GetEnvironmentVariable "NREPL_PORT") "1667") 1667)
+              server (start-nrepl root host port)]
+          (reset! nrepl* server)
+          (println (str "nREPL server started on " host ":" port))
+          (println "Connect using:")
+          (println (str "  lein repl :connect " host ":" port))
+          (println "  Calva: Connect to Running nREPL Server")
+          (println "  CIDER: cider-connect-clj")))
+
+      (load-package-assembly! "com.rpl.specter.clr" "1.1.7-clrfix1" "com.rpl.specter.dll")
+      (clojure.core/load-file specter-file)))
   (require 'demo.specter)
   (let [run-var (ns-resolve 'demo.specter 'run)]
     (when (nil? run-var)
       (throw (ex-info "Cannot resolve demo.specter/run" {})))
-    (prn (run-var))))
+    (prn (run-var)))
+  (when-let [server @nrepl*]
+    (let [stop-nrepl (ns-resolve 'demo.nrepl-util 'stop-nrepl!)]
+      (when stop-nrepl
+        (stop-nrepl server)))))

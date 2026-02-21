@@ -16,8 +16,8 @@
 # 构建项目
 dotnet build
 
-# 运行
-dotnet run
+# 运行（CLI）
+dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 
 # 发布
 dotnet publish -c Release
@@ -26,19 +26,21 @@ dotnet publish -c Release
 ## 代码结构
 
 ```
-Program.cs
-├── Bencode 类              # Bencode 编解码
-│   ├── Encode()            # 编码各种类型
-│   └── DecodeDict()        # 解码字典
-├── NReplServer 类          # nREPL 服务器
-│   ├── HandleClient()      # 处理客户端连接
-│   ├── HandleMessage()     # 消息路由
-│   ├── HandleEval()        # 代码求值
-│   ├── HandleComplete()    # 自动补全
-│   ├── HandleInfo()        # 符号信息
-│   ├── HandleEldoc()       # 参数提示
-│   └── ...                 # 其他操作
-└── Session 类              # 会话管理
+src/
+├── BencodeCodec.cs                 # Bencode 编解码
+├── NReplServer.Core.cs             # 连接/协议/消息分发
+├── NReplServer.Eval.cs             # eval 与命名空间切换
+├── NReplServer.SessionHandlers.cs  # clone/ls-sessions/interrupt/load-file
+├── NReplServer.Completion.cs       # 补全入口
+├── NReplServer.Completion.Dot.cs   # 点调用补全
+├── NReplServer.Completion.Cache.cs # 反射缓存
+├── NReplServer.Info.cs             # info 处理
+├── NReplServer.Eldoc.cs            # eldoc 入口
+├── NReplServer.Eldoc.Dot.cs        # 点调用 eldoc
+├── NReplServer.Eldoc.Clr.cs        # CLR 静态成员 eldoc
+├── NReplServer.Utilities.cs        # 通用工具
+├── NReplServer.Parsing.cs          # 补全/eldoc 解析
+└── NReplSession.cs                 # 会话模型
 ```
 
 ## 添加新功能
