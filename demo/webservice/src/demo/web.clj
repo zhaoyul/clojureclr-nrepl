@@ -1,5 +1,6 @@
 (ns demo.web
-  (:import [System.Net HttpListener]
+  (:import [System Console Environment]
+           [System.Net HttpListener]
            [System.Text Encoding]
            [System.IO StreamReader]
            [System.Threading Thread]))
@@ -83,3 +84,16 @@
       (.Close listener)
       (catch Exception _))
     (reset! listener* nil)))
+
+(defn- env-port []
+  (or (some-> (Environment/GetEnvironmentVariable "WEB_PORT") parse-long)
+      8080))
+
+(defn -main [& _]
+  (let [host (or (Environment/GetEnvironmentVariable "WEB_HOST") "127.0.0.1")
+        port (env-port)]
+    (start! host port)
+    (println (format "webservice running on http://%s:%d/" host (int port)))
+    (println "Press Enter to stop...")
+    (Console/ReadLine)
+    (stop!)))
