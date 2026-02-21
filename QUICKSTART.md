@@ -12,6 +12,13 @@ dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 M-x cider-connect-clj  # 127.0.0.1:1667
 ```
 
+可选：Clojure-only 入口（适合作为所有项目起点）
+
+```bash
+dotnet tool install --global Clojure.Main --version 1.12.3-alpha4
+clojure.main -i demo/run-repl-only.clj -e "(demo.run-repl-only/-main)"
+```
+
 ## 2. 嵌入 .NET 应用
 
 ```csharp
