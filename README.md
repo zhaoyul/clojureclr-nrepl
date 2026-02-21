@@ -51,17 +51,17 @@ WEB_HOST=127.0.0.1 WEB_PORT=8081 dotnet run --project demo/webservice/clojureclr
 - `GET /health` → `{"ok":true}`
 - `POST /echo` → 原样返回请求体
 
-### Demo（ClojureCLR Webservice + ASP.NET Core Minimal API）
+### Demo（ClojureCLR Webservice - Minimal 版）
 
-使用 Kestrel + Minimal API，业务逻辑由 Clojure 实现：
+纯 ClojureCLR 实现（不需要写 C# 业务代码）：
 
 ```bash
 dotnet run --project demo/webservice-minimal/clojureclr-webservice-minimal.csproj
 ```
 
-默认使用 ASP.NET 的地址配置（`ASPNETCORE_URLS`）。例如：
+默认监听 `http://127.0.0.1:8082/`，可用环境变量覆盖：
 ```bash
-ASPNETCORE_URLS=http://127.0.0.1:8082 dotnet run --project demo/webservice-minimal/clojureclr-webservice-minimal.csproj
+WEB_HOST=127.0.0.1 WEB_PORT=8082 dotnet run --project demo/webservice-minimal/clojureclr-webservice-minimal.csproj
 ```
 
 路由示例：
