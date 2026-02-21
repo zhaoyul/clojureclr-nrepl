@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>com.rpl.specter</AssemblyName>
+    <RootNamespace>com.rpl.specter</RootNamespace>
+    <PackageId>com.rpl.specter.clr</PackageId>
+    <Version>1.1.7-clrfix1</Version>
+    <Authors>Red Planet Labs, ClojureCLR contributors</Authors>
+    <Description>Specter port for ClojureCLR.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageTags>clojure;clojureclr;specter</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Clojure" Version="1.12.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Placeholder.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <EmbeddedResource Include="src/clj/**/*.clj">
+      <LogicalName>$([System.String]::Copy('%(RecursiveDir)').Replace('\\','/').Replace('/','.'))%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+</Project>

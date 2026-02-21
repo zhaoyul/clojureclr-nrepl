@@ -18,32 +18,49 @@ dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 
 服务器将在 `127.0.0.1:1667` 启动。
 
-### Demo（ClojureCLR + core.async）
+### Demo（Clojure-only, core.async + nREPL）
 
+先安装 Clojure.Main（一次）：
 ```bash
-./tools/build_core_async_local.sh
-dotnet run --project demo/clojureclr-demo.csproj
+dotnet tool install --global Clojure.Main --version 1.12.3-alpha4
 ```
 
-注意：`clojure.core.async` 在 CLR 上依赖 `clojure.tools.analyzer.clr`。demo 项目已内置该依赖；如果你在自己的项目里使用 core.async，请一并引用。
+准备依赖与本地构建（一次）：
+```bash
+dotnet build -c Debug clojureCLR-nrepl.csproj
+dotnet restore demo/clojureclr-demo.csproj
+```
 
-运行后会：
-1. 启动内置 nREPL server
-2. `load-file` 加载 `demo/src/demo/core.clj`
-3. 加载已打补丁的 `clojure.core.async`
-4. 执行 `demo.core/run`
+运行：
+```bash
+clojure -i demo/run-core.clj -e "(demo.run-core/-main)"
+```
 
-### Demo（ClojureCLR Webservice + .NET HttpListener）
+可选环境变量：
+- `NREPL_HOST`（默认 `127.0.0.1`）
+- `NREPL_PORT`（默认 `1667`）
 
-使用 Clojure 直接驱动 .NET `HttpListener`，无需额外 C# Web 框架：
+注意：`clojure.core.async.clrfix` 在 CLR 上依赖 `clojure.tools.analyzer.clr`。以上脚本会从本机 NuGet cache 加载两者。
+依赖清单（与 `demo/run-core.clj` 保持一致）：
+- `clojure.core.async.clrfix` `1.7.701-clrfix2`
+- `clojure.tools.analyzer.clr` `1.3.2`
+- `clojure.tools.analyzer` `1.1.1`
+- `clojure.tools.reader` `1.3.7`
+- `clojure.core.memoize` `1.1.266`
+- `clojure.core.cache` `1.1.234`
+- `clojure.data.priority-map` `1.2.0`
+
+### Demo（Clojure-only Webservice + .NET HttpListener）
+
+使用 Clojure 直接驱动 .NET `HttpListener`，无需 C# Web 框架：
 
 ```bash
-dotnet run --project demo/webservice/clojureclr-webservice.csproj
+clojure -i demo/run-webservice.clj -e "(demo.run-webservice/-main)"
 ```
 
 默认监听 `http://127.0.0.1:8080/`，可用环境变量覆盖：
 ```bash
-WEB_HOST=127.0.0.1 WEB_PORT=8081 dotnet run --project demo/webservice/clojureclr-webservice.csproj
+WEB_HOST=127.0.0.1 WEB_PORT=8081 clojure -i demo/run-webservice.clj -e "(demo.run-webservice/-main)"
 ```
 
 路由示例：
@@ -51,17 +68,29 @@ WEB_HOST=127.0.0.1 WEB_PORT=8081 dotnet run --project demo/webservice/clojureclr
 - `GET /health` → `{"ok":true}`
 - `POST /echo` → 原样返回请求体
 
-### Demo（ClojureCLR Webservice + ASP.NET Core Minimal API）
+### Demo（Clojure-only Specter）
 
-使用 Kestrel + Minimal API，业务逻辑由 Clojure 实现：
-
+准备依赖（一次）：
 ```bash
-dotnet run --project demo/webservice-minimal/clojureclr-webservice-minimal.csproj
+dotnet restore demo/specter-demo/specter-demo.csproj
 ```
 
-默认使用 ASP.NET 的地址配置（`ASPNETCORE_URLS`）。例如：
+运行：
 ```bash
-ASPNETCORE_URLS=http://127.0.0.1:8082 dotnet run --project demo/webservice-minimal/clojureclr-webservice-minimal.csproj
+clojure -i demo/run-specter.clj -e "(demo.run-specter/-main)"
+```
+
+### Demo（Clojure-only Minimal API）
+
+使用 ASP.NET Core Minimal API，入口与路由均为 Clojure 代码：
+
+```bash
+clojure -i demo/run-webservice-minimal.clj -e "(demo.run-webservice-minimal/-main)"
+```
+
+默认使用 `ASPNETCORE_URLS`（若未设置，按 ASP.NET Core 默认值）。例如：
+```bash
+ASPNETCORE_URLS=http://127.0.0.1:8082 clojure -i demo/run-webservice-minimal.clj -e "(demo.run-webservice-minimal/-main)"
 ```
 
 路由示例：

@@ -9,8 +9,13 @@
   <ItemGroup>
     <ProjectReference Include="..\clojureCLR-nrepl.csproj" />
     <PackageReference Include="Clojure" Version="1.12.2" />
-    <PackageReference Include="clojure.core.async" Version="1.7.701-clrfix2" />
+    <PackageReference Include="clojure.core.async.clrfix" Version="1.7.701-clrfix2" />
     <PackageReference Include="clojure.tools.analyzer.clr" Version="1.3.2" />
+    <PackageReference Include="clojure.tools.analyzer" Version="1.1.1" />
+    <PackageReference Include="clojure.tools.reader" Version="1.3.7" />
+    <PackageReference Include="clojure.core.memoize" Version="1.1.266" />
+    <PackageReference Include="clojure.core.cache" Version="1.1.234" />
+    <PackageReference Include="clojure.data.priority-map" Version="1.2.0" />
   </ItemGroup>
 
   <ItemGroup>
