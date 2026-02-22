@@ -1,12 +1,13 @@
 # Release
 
-This repo publishes two NuGet packages:
+This repo publishes three NuGet packages:
+- `ClojureCLR.NRepl`
 - `clojure.core.async.clrfix`
 - `com.rpl.specter.clr`
 
 ## Prerequisites
 
-1. A NuGet.org API key with `Push` scope, restricted to the two package IDs above.
+1. A NuGet.org API key with `Push` scope, restricted to the three package IDs above.
 2. Versions to release:
    - `clojure.core.async.clrfix` default: `1.7.701-clrfix2`
    - `com.rpl.specter.clr` default: `1.1.7-clrfix1`
@@ -17,6 +18,11 @@ export NUGET_API_KEY="YOUR_KEY"
 ```
 
 ## Build and Pack
+
+0. Build nREPL package:
+```
+dotnet pack clojureCLR-nrepl.csproj -c Release -o nupkgs
+```
 
 1. Generate CLR-friendly `.clj` sources for Specter:
 ```
@@ -36,6 +42,11 @@ dotnet pack packages/specter-clr/specter-clr.csproj -c Release -o nupkgs /p:Pack
 Packages will be under `nupkgs/`.
 
 ## Push to NuGet.org
+
+0. Push nREPL:
+```
+dotnet nuget push nupkgs/ClojureCLR.NRepl.*.nupkg -k "$NUGET_API_KEY" -s https://api.nuget.org/v3/index.json --skip-duplicate
+```
 
 1. Push core.async:
 ```

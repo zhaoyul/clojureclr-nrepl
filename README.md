@@ -5,7 +5,7 @@
 ## 特性
 
 - **完整协议支持**: Bencode 编码/解码，会话管理
-- **CIDER 兼容**: 支持自动补全、文档查询、参数提示等 middleware
+- **CIDER 兼容**: 支持自动补全、文档查询、参数提示等 middleware（实例成员补全有已知限制，见 docs/USAGE）
 - **轻量级**: 单文件实现，零 Clojure 依赖（运行时自动加载）
 - **跨平台**: 基于 .NET 8.0，支持 Windows、macOS、Linux
 - **CLR 静态成员补全**: 支持 `Type/Member`（例如 `Enumerable/Where`），前提是已 `import` 对应类型
@@ -197,8 +197,8 @@ python3 test_nrepl.py
 补全能力（摘要）:
 - Clojure 命名空间中的 var/macro
 - CLR 静态成员补全：`Type/Member`（已导入类型或完整类型名）
-- 实例成员补全：`. 形式`（接收者为命名空间中可解析的符号）
-- `info`/`eldoc` 支持 CLR 静态成员
+- 实例成员补全：`. 形式`（接收者为命名空间中可解析的符号；局部绑定不支持）
+- `info`/`eldoc` 支持 CLR 静态成员（实例成员依赖客户端上下文，可能不稳定）
 
 ## 技术实现
 

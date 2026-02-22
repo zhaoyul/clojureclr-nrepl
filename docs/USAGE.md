@@ -268,29 +268,10 @@ NREPL_HOST=0.0.0.0 NREPL_PORT=7888 \
   dotnet run --project cli/clojureCLR-nrepl-cli.csproj
 ```
 
-### 配置文件
+### 配置文件（自定义）
 
-创建 `nrepl-config.json`:
-
-```json
-{
-  "host": "127.0.0.1",
-  "port": 1667,
-  "debug": false,
-  "maxSessions": 10
-}
-```
-
-读取：
-
-```csharp
-using System.Text.Json;
-
-var config = JsonSerializer.Deserialize<NReplConfig>(
-    File.ReadAllText("nrepl-config.json"));
-
-var server = new NReplServer(config.Host, config.Port);
-```
+当前 CLI 仅支持环境变量 `NREPL_HOST` / `NREPL_PORT`。
+如果你希望使用配置文件，请在你的应用里自行读取 JSON/YAML 并创建 `NReplServer`。
 
 ---
 
@@ -306,6 +287,8 @@ var server = new NReplServer(config.Host, config.Port);
    (System.Linq.Enumerable/Where ...)
    ```
    未导入时不会出现 `Enumerable/*` 补全候选，但 `System.Linq.Enumerable/*` 可用。
+   注意：如果客户端发送的 `ns` 不是当前命名空间（例如 `clojure.core`），
+   则无法解析你在用户命名空间里 `import` 的类型。
 
 2. **实例成员补全（. 形式）**
    支持以下常见写法（接收者需是命名空间中已解析的符号）：
@@ -313,7 +296,12 @@ var server = new NReplServer(config.Host, config.Port);
    (. s Sub)            ; s 为字符串变量
    (.Substring s)       ; method-first
    ```
-   如果接收者解析为 `Type`，则会返回该类型的静态成员补全。
+   说明：
+   - 接收者必须是 **命名空间中的 var 或 Type**（`def` 出来的全局 var）。
+     `let`/函数参数等 **局部绑定** 目前无法解析。
+   - method-first 写法依赖客户端提供 `context`，部分客户端可能不发送或字段不完整，
+     会导致补全缺失。
+   - 若客户端发送的 `ns` 为 `clojure.core`，则无法解析你当前文件中的 `def`。
 
 3. **补全请求参数**
    - 大多数客户端会发送 `symbol` 或 `prefix`，服务器直接使用。
@@ -322,7 +310,8 @@ var server = new NReplServer(config.Host, config.Port);
 
 4. **已知限制**
    - 仅支持 **public** 成员。
-   - `.` 补全目前只支持 **符号接收者**（不解析复杂表达式）。
+   - `.` 补全目前只支持 **符号接收者**（不解析复杂表达式或局部绑定）。
+   - CIDER/Calva 在某些场景可能发送 `ns=clojure.core`，会导致无法解析用户命名空间的 `def/import`。
    - 不做重载参数的智能排序或过滤。
 
 ### 符号信息与参数提示
@@ -332,6 +321,7 @@ var server = new NReplServer(config.Host, config.Port);
   (Enumerable/Where)
   ; info/eldoc 会返回参数列表与成员类型
   ```
+  实例成员的 `eldoc` 目前依赖客户端上下文，可能不稳定。
 
 ### 安全配置
 

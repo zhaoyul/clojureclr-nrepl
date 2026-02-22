@@ -32,6 +32,9 @@ dotnet run --project examples/starter/starter.csproj
 NREPL_ENABLE=1 dotnet run --project examples/starter/starter.csproj
 ```
 
+说明：如果 `-main` 执行完毕，进程会退出。需要常驻时，请在 `-main` 中阻塞，
+或开启 nREPL 并保持运行（按你的实现方式决定）。
+
 ## 说明
 
 - `NuGet.config` 默认把 `../../nupkgs` 作为本地源（本仓库内可直接用）。

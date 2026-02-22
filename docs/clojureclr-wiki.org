@@ -6,6 +6,12 @@
 
 ClojureCLR 是 Clojure 的 .NET 原生实现。
 
+* 验证说明
+
+本文件为学习笔记，示例不保证已逐条验证。
+请以当前 ClojureCLR 版本与实际 REPL 结果为准。
+如果示例与编辑器自动补全/eldoc 不一致，请手动在 nREPL 中验证。
+
 ** 支持的 .NET 版本（以当前 NuGet 包为准）
 
 以下来自本项目当前使用的 Clojure NuGet 包（`clojure`）目标框架：
@@ -23,7 +29,7 @@ ClojureCLR 是 Clojure 的 .NET 原生实现。
 
 * 基础 CLR 互操作 (Basic CLR Interop)
 
-ClojureCLR 支持 clojure.org/java_interop 中提到的所有基础互操作函数。
+ClojureCLR 支持大多数基础互操作形式，具体以当前版本实现为准。
 
 ** 成员访问
 
