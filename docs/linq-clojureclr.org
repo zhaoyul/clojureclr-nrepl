@@ -1,0 +1,793 @@
+#+TITLE: Linq编程指南（ClojureCLR 版）
+#+AUTHOR: Kevin'
+#+LANGUAGE: zh-CN
+#+OPTIONS: toc:t
+#+PROPERTY: header-args:clojure :session linq :results output :exports both
+
+#+BEGIN_SRC clojure :results none
+{:title "Linq编程指南"
+ :author "Kevin'"
+ :layout :post
+ :tags  ["linq" "c#"]
+ :toc true}
+#+END_SRC
+
+[[/img/dotnet/002.jpg]]
+
+`Language Integrated Query (Linq)` 是 C# 语言集成的数据查询技术，广泛用于结构化数据（XML, SQL, JSON 等）的处理。
+
+本文所有示例均使用 **ClojureCLR** 调用 `.NET LINQ`（`System.Linq.Enumerable`），并按 org-mode 组织。
+形式上 **第一段是代码，第二段是代码执行结果**，可在 ClojureCLR REPL 或脚本中逐段执行。
+
+* 基础准备（一次即可）
+
+#+BEGIN_SRC clojure :exports none
+(ns linq.guide
+  (:import [System Type]
+           [System.Linq Enumerable]
+           [System.Xml.Linq XElement]))
+
+(def ^Type func2-type (Type/GetType "System.Func`2"))
+(def ^Type func3-type (Type/GetType "System.Func`3"))
+
+(defn func2
+  "创建 Func<T1,T2> 委托。"
+  [^Type t1 ^Type t2 f]
+  (let [delegate-type (.MakeGenericType func2-type (into-array Type [t1 t2]))]
+    (clojure.lang.Runtime.Converter/ConvertToDelegate f delegate-type)))
+
+(defn func3
+  "创建 Func<T1,T2,T3> 委托。"
+  [^Type t1 ^Type t2 ^Type t3 f]
+  (let [delegate-type (.MakeGenericType func3-type (into-array Type [t1 t2 t3]))]
+    (clojure.lang.Runtime.Converter/ConvertToDelegate f delegate-type)))
+
+(defn invoke-generic
+  "调用 Enumerable 的泛型方法。type-args 为 System.Type 列表。"
+  [^String method-name type-args args]
+  (let [methods (.GetMethods Enumerable)
+        matches (filter #(= method-name (.Name ^System.Reflection.MethodInfo %)) methods)
+        method (first (filter #(.IsGenericMethodDefinition ^System.Reflection.MethodInfo %) matches))
+        m (.MakeGenericMethod ^System.Reflection.MethodInfo method (into-array Type type-args))]
+    (.Invoke m nil (object-array args))))
+
+(defn print-seq [xs]
+  (doseq [x xs] (println x)))
+#+END_SRC
+
+* 第一章 Linq 基础介绍
+
+** Linq 的优势
+
+1. 比命令式风格更简洁
+2. 更清晰地表达意图
+3. 适用于多种数据源（本地对象、数据库、XML、JSON 等）
+4. 组合式构建，逐步拼装查询
+5. 类型检查帮助构建安全查询
+
+** Linq 的组成元素
+
+- 元素
+- 序列
+  - `IEnumerable<T>`：本地查询
+  - `IQueryable<T>`：解释型（远程）查询
+- 查询结果：可以是 value、元素或新序列
+
+#+BEGIN_SRC clojure
+(let [fibonacci (into-array System.Int32 [0 1 1 2 3 5])
+      number-of-elements (Enumerable/Count fibonacci)
+      distinct (Enumerable/Distinct fibonacci)]
+  (println (format "元素总数: %d" number-of-elements))
+  (println "处理得到的序列的元素:")
+  (doseq [n distinct] (println n)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+元素总数: 6
+处理得到的序列的元素:
+0
+1
+2
+3
+5
+#+end_example
+
+** Linq 是 Lazy 的
+
+以下示例中，查询表达式已创建，但未执行；修改原始数组后才会体现在结果里。
+
+#+BEGIN_SRC clojure
+(let [fibonacci (int-array [0 1 1 2 3 5])
+      pred (func2 System.Int32 System.Boolean (fn [^int x] (> x 2)))
+      query (Enumerable/Where fibonacci pred)]
+  (aset fibonacci 0 99)
+  (doseq [n query] (println n)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+99
+3
+5
+#+end_example
+
+使用 `ToArray` 强制求值后，结果不再受输入变更影响：
+
+#+BEGIN_SRC clojure
+(let [fibonacci (int-array [0 1 1 2 3 5])
+      pred (func2 System.Int32 System.Boolean (fn [^int x] (> x 2)))
+      query (Enumerable/ToArray (Enumerable/Where fibonacci pred))]
+  (aset fibonacci 0 99)
+  (doseq [n query] (println n)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+3
+5
+#+end_example
+
+** Lambda 表达式在查询中的作用
+
+LINQ 操作符接收 `Func<...>` 作为自定义逻辑，这里我们用 Clojure 函数生成委托。
+
+#+BEGIN_SRC clojure
+(let [fibonacci (into-array System.Int32 [0 1 1 2 3 5])
+      pred (func2 System.Int32 System.Boolean (fn [^int x] (> x 2)))]
+  (print-seq (Enumerable/Where fibonacci pred)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+3
+5
+#+end_example
+
+** 本地与解释型查询
+
+本地查询基于 `IEnumerable<T>`；解释型查询基于 `IQueryable<T>`。
+下例演示 LINQ to XML 的本地查询：
+
+#+BEGIN_SRC clojure
+(let [xml "<ingredients>
+  <ingredient name='milk' quantity='200' price='2.99' />
+  <ingredient name='sugar' quantity='100' price='4.99' />
+  <ingredient name='safron' quantity='1' price='46.77' />
+</ingredients>"
+      xml-data (XElement/Parse xml)
+      pred (func2 XElement System.Boolean
+                  (fn [^XElement x]
+                    (= "milk" (.. x (Attribute "name") Value))))
+      milk (Enumerable/First (.Descendants xml-data "ingredient") pred)
+      quantity (Enumerable/First (Enumerable/Skip (.Attributes milk) 1))]
+  (println quantity))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+quantity="200"
+#+end_example
+
+* 第二章 两种风格的 Linq
+
+** 传统风格（Fluent style）
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients (into-array Ingredient
+                               [(->Ingredient "Sugar" 500)
+                                (->Ingredient "Egg" 100)
+                                (->Ingredient "Milk" 150)
+                                (->Ingredient "Flour" 50)
+                                (->Ingredient "Butter" 200)])
+      pred (func2 Ingredient System.Boolean (fn [i] (>= (:Calories i) 150)))
+      keyfn (func2 Ingredient System.String (fn [i] (:Name i)))
+      sel (func2 Ingredient System.String (fn [i] (:Name i)))
+      query (Enumerable/Select
+              (Enumerable/OrderBy (Enumerable/Where ingredients pred) keyfn)
+              sel)]
+  (doseq [name query] (println name)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+Butter
+Milk
+Sugar
+#+end_example
+
+** 查询表达式风格（Clojure 对照）
+
+Clojure 没有 C# query syntax，但 `for` 可表达类似语义：
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients [(->Ingredient "Sugar" 500)
+                   (->Ingredient "Egg" 100)
+                   (->Ingredient "Milk" 150)
+                   (->Ingredient "Flour" 50)
+                   (->Ingredient "Butter" 200)]
+      query (->> (for [i ingredients
+                       :when (>= (:Calories i) 150)]
+                   (:Name i))
+                 (sort))]
+  (doseq [name query] (println name)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+Butter
+Milk
+Sugar
+#+end_example
+
+** let 表达式
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients [(->Ingredient "Sugar" 500)
+                   (->Ingredient "Egg" 100)
+                   (->Ingredient "Milk" 150)
+                   (->Ingredient "Flour" 50)
+                   (->Ingredient "Butter" 200)]
+      query (for [i ingredients
+                  :let [is-dairy (or (= (:Name i) "Milk") (= (:Name i) "Butter"))]
+                  :when (and (>= (:Calories i) 150) is-dairy)]
+              i)]
+  (doseq [x query] (println x)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+#linq.guide.Ingredient{:Name "Milk", :Calories 150}
+#linq.guide.Ingredient{:Name "Butter", :Calories 200}
+#+end_example
+
+** into（等价思路）
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients [(->Ingredient "Sugar" 500)
+                   (->Ingredient "Egg" 100)
+                   (->Ingredient "Milk" 150)
+                   (->Ingredient "Flour" 50)
+                   (->Ingredient "Butter" 200)]
+      query (for [i ingredients
+                  :let [temp {:OriginalIngredient i
+                              :IsDairy (or (= (:Name i) "Milk") (= (:Name i) "Butter"))
+                              :IsHighCalorie (>= (:Calories i) 150)}]
+                  :when (and (:IsDairy temp) (:IsHighCalorie temp))]
+              (:OriginalIngredient temp))]
+  (doseq [i query] (println (:Name i))))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+Milk
+Butter
+#+end_example
+
+** Join
+
+#+BEGIN_SRC clojure
+(defrecord Recipe [Id Name])
+(defrecord Review [RecipeId ReviewText])
+
+(let [recipes (into-array Recipe
+                           [(->Recipe 1 "宫保鸡丁")
+                            (->Recipe 2 "葱烧海参")
+                            (->Recipe 3 "红烧肉")])
+      reviews (into-array Review
+                           [(->Review 1 "非常赞")
+                            (->Review 2 "对得起价格")
+                            (->Review 1 "太酸")
+                            (->Review 2 "海参太小")])
+      outer-key (func2 Recipe System.Int32 (fn [r] (:Id r)))
+      inner-key (func2 Review System.Int32 (fn [r] (:RecipeId r)))
+      selector (func3 Recipe Review System.Object
+                      (fn [r v] (str (:Name r) " - '" (:ReviewText v) "'")))
+      query (Enumerable/Join recipes reviews outer-key inner-key selector)]
+  (doseq [x query] (println x)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+宫保鸡丁 - '非常赞'
+宫保鸡丁 - '太酸'
+葱烧海参 - '对得起价格'
+葱烧海参 - '海参太小'
+#+end_example
+
+** Group Join
+
+#+BEGIN_SRC clojure
+(defrecord Recipe [Id Name])
+(defrecord Review [RecipeId ReviewText])
+
+(let [recipes (into-array Recipe
+                           [(->Recipe 1 "宫保鸡丁")
+                            (->Recipe 2 "葱烧海参")
+                            (->Recipe 3 "红烧肉")])
+      reviews (into-array Review
+                           [(->Review 1 "非常赞")
+                            (->Review 2 "对得起价格")
+                            (->Review 1 "太酸")
+                            (->Review 2 "海参太小")])
+      outer-key (func2 Recipe System.Int32 (fn [r] (:Id r)))
+      inner-key (func2 Review System.Int32 (fn [r] (:RecipeId r)))
+      selector (func3 Recipe System.Collections.IEnumerable System.Object
+                      (fn [r revs] {:RecipeName (:Name r) :Reviews revs}))
+      query (Enumerable/GroupJoin recipes reviews outer-key inner-key selector)]
+  (doseq [item query]
+    (println (:RecipeName item))
+    (doseq [r (:Reviews item)]
+      (println "-" (:ReviewText r)))))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+宫保鸡丁
+- 非常赞
+- 太酸
+葱烧海参
+- 对得起价格
+- 海参太小
+红烧肉
+#+end_example
+
+** Left Outer Join
+
+#+BEGIN_SRC clojure
+(defrecord Recipe [Id Name])
+(defrecord Review [RecipeId ReviewText])
+
+(let [recipes (into-array Recipe
+                           [(->Recipe 1 "宫保鸡丁")
+                            (->Recipe 2 "葱烧海参")
+                            (->Recipe 3 "红烧肉")])
+      reviews (into-array Review
+                           [(->Review 1 "非常赞")
+                            (->Review 2 "对得起价格")
+                            (->Review 1 "太酸")
+                            (->Review 2 "海参太小")])
+      outer-key (func2 Recipe System.Int32 (fn [r] (:Id r)))
+      inner-key (func2 Review System.Int32 (fn [r] (:RecipeId r)))
+      selector (func3 Recipe System.Collections.IEnumerable System.Object
+                      (fn [r revs] {:RecipeName (:Name r) :Reviews revs}))
+      grouped (Enumerable/GroupJoin recipes reviews outer-key inner-key selector)
+      flatten (func2 System.Object System.Collections.IEnumerable
+                     (fn [item]
+                       (let [rs (Enumerable/DefaultIfEmpty (:Reviews item) nil)
+                             proj (func2 Review System.Object
+                                         (fn [rv]
+                                           (str (:RecipeName item) " - '" (if (nil? rv) "n/a" (:ReviewText rv)) "'")))]
+                         (Enumerable/Select rs proj))))
+      query (Enumerable/SelectMany grouped flatten)]
+  (doseq [x query] (println x)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+宫保鸡丁 - '非常赞'
+宫保鸡丁 - '太酸'
+葱烧海参 - '对得起价格'
+葱烧海参 - '海参太小'
+红烧肉 - 'n/a'
+#+end_example
+
+* 第三章 操作符
+
+** 过滤（Where）
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients (into-array Ingredient
+                               [(->Ingredient "糖" 500)
+                                (->Ingredient "五花肉" 500)
+                                (->Ingredient "黄油" 500)
+                                (->Ingredient "鸡蛋" 100)
+                                (->Ingredient "牛奶" 100)
+                                (->Ingredient "面粉" 50)
+                                (->Ingredient "燕麦" 50)])
+      pred (func2 Ingredient System.Boolean (fn [i] (>= (:Calories i) 200)))
+      query (Enumerable/Where ingredients pred)]
+  (doseq [i query] (println (:Name i))))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+糖
+五花肉
+黄油
+#+end_example
+
+** 映射（Select / SelectMany）
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients (into-array Ingredient
+                               [(->Ingredient "糖" 500)
+                                (->Ingredient "五花肉" 500)
+                                (->Ingredient "黄油" 500)
+                                (->Ingredient "鸡蛋" 100)
+                                (->Ingredient "牛奶" 100)
+                                (->Ingredient "面粉" 50)
+                                (->Ingredient "燕麦" 50)])
+      sel (func2 Ingredient System.String (fn [i] (:Name i)))
+      query (Enumerable/Select ingredients sel)]
+  (doseq [n query] (println n)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+糖
+五花肉
+黄油
+鸡蛋
+牛奶
+面粉
+燕麦
+#+end_example
+
+#+BEGIN_SRC clojure
+(let [ingredients (into-array System.String ["糖" "鸡蛋" "牛奶" "面粉" "黄油"])
+      sel (func2 System.String System.Collections.IEnumerable
+                 (fn [s] (.ToCharArray s)))
+      query (Enumerable/SelectMany ingredients sel)]
+  (doseq [c query] (println c))
+  (println "\n对比 map 的结果:\n")
+  (let [q2 (Enumerable/Select ingredients sel)]
+    (doseq [arr q2] (println (String. ^chars arr)))))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+糖
+鸡
+蛋
+牛
+奶
+面
+粉
+黄
+油
+
+对比 map 的结果:
+
+糖
+鸡蛋
+牛奶
+面粉
+黄油
+#+end_example
+
+** 分段（Take / Skip / TakeWhile / SkipWhile）
+
+#+BEGIN_SRC clojure
+(let [ingredients (into-array System.String ["糖" "鸡蛋" "牛奶" "面粉" "黄油"])
+      query (Enumerable/Take ingredients 3)]
+  (print-seq query))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+糖
+鸡蛋
+牛奶
+#+end_example
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients (into-array Ingredient
+                               [(->Ingredient "糖" 500)
+                                (->Ingredient "五花肉" 500)
+                                (->Ingredient "黄油" 500)
+                                (->Ingredient "面粉" 50)
+                                (->Ingredient "鸡蛋" 100)
+                                (->Ingredient "牛奶" 100)
+                                (->Ingredient "燕麦" 50)])
+      pred (func2 Ingredient System.Boolean (fn [i] (>= (:Calories i) 100)))
+      query (Enumerable/TakeWhile ingredients pred)]
+  (doseq [i query] (println i)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+#linq.guide.Ingredient{:Name "糖", :Calories 500}
+#linq.guide.Ingredient{:Name "五花肉", :Calories 500}
+#linq.guide.Ingredient{:Name "黄油", :Calories 500}
+#+end_example
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients (into-array Ingredient
+                               [(->Ingredient "糖" 500)
+                                (->Ingredient "五花肉" 500)
+                                (->Ingredient "黄油" 500)
+                                (->Ingredient "鸡蛋" 100)
+                                (->Ingredient "牛奶" 100)
+                                (->Ingredient "面粉" 50)
+                                (->Ingredient "燕麦" 50)])
+      query (Enumerable/Skip ingredients 3)]
+  (doseq [i query] (println i)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+#linq.guide.Ingredient{:Name "鸡蛋", :Calories 100}
+#linq.guide.Ingredient{:Name "牛奶", :Calories 100}
+#linq.guide.Ingredient{:Name "面粉", :Calories 50}
+#linq.guide.Ingredient{:Name "燕麦", :Calories 50}
+#+end_example
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients (into-array Ingredient
+                               [(->Ingredient "糖" 500)
+                                (->Ingredient "五花肉" 500)
+                                (->Ingredient "黄油" 500)
+                                (->Ingredient "鸡蛋" 100)
+                                (->Ingredient "牛奶" 100)
+                                (->Ingredient "面粉" 50)
+                                (->Ingredient "燕麦" 50)])
+      pred (func2 Ingredient System.Boolean (fn [i] (not= (:Name i) "牛奶")))
+      query (Enumerable/SkipWhile ingredients pred)]
+  (doseq [i query] (println i)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+#linq.guide.Ingredient{:Name "牛奶", :Calories 100}
+#linq.guide.Ingredient{:Name "面粉", :Calories 50}
+#linq.guide.Ingredient{:Name "燕麦", :Calories 50}
+#+end_example
+
+** 顺序（OrderBy / ThenBy / Reverse）
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients (into-array Ingredient
+                               [(->Ingredient "糖" 500)
+                                (->Ingredient "五花肉" 500)
+                                (->Ingredient "黄油" 500)
+                                (->Ingredient "鸡蛋" 100)
+                                (->Ingredient "牛奶" 100)
+                                (->Ingredient "面粉" 50)
+                                (->Ingredient "燕麦" 50)])
+      keyfn (func2 Ingredient System.Int32 (fn [i] (:Calories i)))
+      query (Enumerable/OrderBy ingredients keyfn)]
+  (doseq [i query] (println i)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+#linq.guide.Ingredient{:Name "面粉", :Calories 50}
+#linq.guide.Ingredient{:Name "燕麦", :Calories 50}
+#linq.guide.Ingredient{:Name "鸡蛋", :Calories 100}
+#linq.guide.Ingredient{:Name "牛奶", :Calories 100}
+#linq.guide.Ingredient{:Name "糖", :Calories 500}
+#linq.guide.Ingredient{:Name "五花肉", :Calories 500}
+#linq.guide.Ingredient{:Name "黄油", :Calories 500}
+#+end_example
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients (into-array Ingredient
+                               [(->Ingredient "糖" 500)
+                                (->Ingredient "五花肉" 500)
+                                (->Ingredient "黄油" 500)
+                                (->Ingredient "鸡蛋" 100)
+                                (->Ingredient "牛奶" 100)
+                                (->Ingredient "面粉" 50)
+                                (->Ingredient "燕麦" 50)])
+      key1 (func2 Ingredient System.Int32 (fn [i] (:Calories i)))
+      key2 (func2 Ingredient System.String (fn [i] (:Name i)))
+      query (-> ingredients
+                (Enumerable/OrderBy key1)
+                (Enumerable/ThenBy key2))]
+  (doseq [i query] (println i)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+#linq.guide.Ingredient{:Name "燕麦", :Calories 50}
+#linq.guide.Ingredient{:Name "面粉", :Calories 50}
+#linq.guide.Ingredient{:Name "牛奶", :Calories 100}
+#linq.guide.Ingredient{:Name "鸡蛋", :Calories 100}
+#linq.guide.Ingredient{:Name "五花肉", :Calories 500}
+#linq.guide.Ingredient{:Name "糖", :Calories 500}
+#linq.guide.Ingredient{:Name "黄油", :Calories 500}
+#+end_example
+
+** 分组（GroupBy）
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients (into-array Ingredient
+                               [(->Ingredient "糖" 500)
+                                (->Ingredient "五花肉" 500)
+                                (->Ingredient "黄油" 500)
+                                (->Ingredient "鸡蛋" 100)
+                                (->Ingredient "牛奶" 100)
+                                (->Ingredient "面粉" 50)
+                                (->Ingredient "燕麦" 50)])
+      keyfn (func2 Ingredient System.Int32 (fn [i] (:Calories i)))
+      query (Enumerable/GroupBy ingredients keyfn)]
+  (doseq [g query]
+    (println (format "原料的卡路里数: %d 卡" (.Key g)))
+    (doseq [i g] (println "-" (:Name i)))))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+原料的卡路里数: 500 卡
+- 糖
+- 五花肉
+- 黄油
+原料的卡路里数: 100 卡
+- 鸡蛋
+- 牛奶
+原料的卡路里数: 50 卡
+- 面粉
+- 燕麦
+#+end_example
+
+** 集合操作（Concat / Union / Intersect / Except）
+
+#+BEGIN_SRC clojure
+(let [apple (into-array System.String ["Apple" "Sugar" "Pastry" "Cinnamon"])
+      cherry (into-array System.String ["Cherry" "Sugar" "Pastry" "Kirsch"])
+      query (Enumerable/Concat apple cherry)]
+  (print-seq query))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+Apple
+Sugar
+Pastry
+Cinnamon
+Cherry
+Sugar
+Pastry
+Kirsch
+#+end_example
+
+#+BEGIN_SRC clojure
+(let [apple (into-array System.String ["Apple" "Sugar" "Pastry" "Cinnamon"])
+      cherry (into-array System.String ["Cherry" "Sugar" "Pastry" "Kirsch"])
+      query (Enumerable/Intersect apple cherry)]
+  (print-seq query))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+Sugar
+Pastry
+#+end_example
+
+** 类型转换（OfType / ToArray / ToList）
+
+#+BEGIN_SRC clojure
+(let [input (object-array ["Apple" 33 "Sugar" 44 \a (System.DateTime.)])
+      query (invoke-generic "OfType" [System.String] [input])]
+  (print-seq query))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+Apple
+Sugar
+#+end_example
+
+** 元素操作（First / Last / Single / ElementAt）
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [ingredients (into-array Ingredient
+                               [(->Ingredient "糖" 500)
+                                (->Ingredient "五花肉" 500)
+                                (->Ingredient "黄油" 500)
+                                (->Ingredient "鸡蛋" 100)
+                                (->Ingredient "牛奶" 100)
+                                (->Ingredient "面粉" 50)
+                                (->Ingredient "燕麦" 50)])
+      first-item (Enumerable/First ingredients)]
+  (println first-item))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+#linq.guide.Ingredient{:Name "糖", :Calories 500}
+#+end_example
+
+** 生成（Empty / Range / Repeat）
+
+#+BEGIN_SRC clojure
+(let [empty (invoke-generic "Empty" [System.Int32] [])]
+  (println (Enumerable/Count empty)))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+0
+#+end_example
+
+#+BEGIN_SRC clojure
+(let [nums (Enumerable/Range 5 6)]
+  (print-seq nums))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+5
+6
+7
+8
+9
+10
+#+end_example
+
+** 统计（Count / Sum / Min / Max / Average / Aggregate）
+
+#+BEGIN_SRC clojure
+(let [nums (into-array System.Int32 [1 2 3])]
+  (println (Enumerable/Count nums))
+  (println (Enumerable/Sum nums))
+  (println (Enumerable/Min nums))
+  (println (Enumerable/Max nums))
+  (println (Enumerable/Average nums))
+  (let [agg (func3 System.Int32 System.Int32 System.Int32
+                   (fn [^int acc ^int x] (+ acc x)))]
+    (println (Enumerable/Aggregate nums 0 agg))))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+3
+6
+1
+3
+2
+6
+#+end_example
+
+** 连接（Zip）
+
+#+BEGIN_SRC clojure
+(defrecord Ingredient [Name Calories])
+
+(let [names (into-array System.String ["Flour" "Butter" "Sugar"])
+      calories (into-array System.Int32 [100 400 500])
+      selector (func3 System.String System.Int32 Ingredient
+                      (fn [n c] (->Ingredient n c)))
+      query (Enumerable/Zip names calories selector)]
+  (doseq [i query]
+    (println (format "%s has %d calories" (:Name i) (:Calories i)))))
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+Flour has 100 calories
+Butter has 400 calories
+Sugar has 500 calories
+#+end_example
+
+* 结语
+
+以上示例展示了如何在 **ClojureCLR** 中调用 `System.Linq.Enumerable` 来使用 LINQ。
+如需补充更多操作符（`Queryable`、PLINQ 等），可继续追加章节。
