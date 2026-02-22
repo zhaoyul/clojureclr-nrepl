@@ -6,3 +6,10 @@
 
 (defn specter_demo []
   (sp/select [sp/ALL] [1 2 3 4]))
+
+(defn -main [& args]
+  (let [name (or (first args) "starter")]
+    (println (str "hello => " (hello name)))
+    (println (str "specter_demo => " (specter_demo)))
+    (when (seq args)
+      (println (str "args => " (pr-str args))))))

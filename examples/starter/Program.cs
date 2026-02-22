@@ -17,11 +17,14 @@ namespace ClojureClrStarter
             PreloadClojureAssemblies();
 
             NReplServer? server = null;
+            var nreplEnabled = IsEnabled("NREPL_ENABLE");
             if (IsEnabled("NREPL_ENABLE"))
             {
-                server = new NReplServer("127.0.0.1", 1667);
+                var host = Environment.GetEnvironmentVariable("NREPL_HOST") ?? "127.0.0.1";
+                var port = ParseInt(Environment.GetEnvironmentVariable("NREPL_PORT"), 1667);
+                server = new NReplServer(host, port);
                 server.Start();
-                Console.WriteLine("nREPL server started on 127.0.0.1:1667");
+                Console.WriteLine($"nREPL server started on {host}:{port}");
             }
 
             try
@@ -33,14 +36,24 @@ namespace ClojureClrStarter
                 Console.WriteLine($"  {cljPath}");
                 Compiler.loadFile(cljPath);
 
-                var hello = RT.var("app.core", "hello");
-                var specterDemo = RT.var("app.core", "specter_demo");
+                var mainVar = RT.var("app.core", "-main");
+                if (mainVar == null)
+                {
+                    throw new InvalidOperationException("Cannot resolve app.core/-main");
+                }
 
-                Console.WriteLine($"hello => {hello.invoke("starter")}");
-                Console.WriteLine($"specter_demo => {specterDemo.invoke()}");
+                // Use Clojure -main as the entry point.
+                mainVar.applyTo(RT.seq(args));
 
+                // Optional C# package demo (kept separate from the Clojure entry).
                 var json = JObject.Parse("{\"ok\":true,\"n\":42}");
                 Console.WriteLine($"json ok => {json["ok"]}, n => {json["n"]}");
+
+                if (nreplEnabled)
+                {
+                    Console.WriteLine("Press Enter to stop...");
+                    Console.ReadLine();
+                }
             }
             finally
             {
@@ -54,6 +67,12 @@ namespace ClojureClrStarter
             if (string.IsNullOrWhiteSpace(raw)) return false;
             var v = raw.Trim().ToLowerInvariant();
             return v == "1" || v == "true" || v == "yes" || v == "on";
+        }
+
+        private static int ParseInt(string? raw, int fallback)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return fallback;
+            return int.TryParse(raw, out var value) ? value : fallback;
         }
 
         private static string FindRepoRoot()

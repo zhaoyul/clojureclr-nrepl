@@ -38,4 +38,5 @@ NREPL_ENABLE=1 dotnet run --project examples/starter/starter.csproj
   如果你把 starter 拷贝到其他目录，请调整该路径或移除该源。
 - `Program.cs` 会预加载 `Clojure.dll`、`Clojure.Source.dll` 和 `com.rpl.specter.dll`，
   以确保 `require` 能找到嵌入的 clj 资源。
+- `src/app/core.clj` 提供 `-main` 作为入口，C# Host 会直接调用它。
 - `src/app/core.clj` 演示了基本的 clj 函数和 specter 调用。
