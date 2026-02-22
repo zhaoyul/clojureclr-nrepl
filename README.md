@@ -122,6 +122,28 @@ NREPL_ENABLE=1 NREPL_PORT=1667 Clojure.Main -i examples/run-webservice-minimal.c
 Clojure.Main -i examples/run-repl-only.clj -e "(demo.run-repl-only/-main)"
 ```
 
+### Demo（C# Host：同时使用 cljr 包 + C# 包）
+
+这个示例在 C# 中同时使用：
+- `com.rpl.specter.clr`（cljr 包）
+- `Newtonsoft.Json`（C# 包）
+- 并可选启动 nREPL
+
+运行：
+```bash
+dotnet run --project examples/csharp-host/csharp-host.csproj
+```
+
+### Starter（模板化项目）
+
+可直接复制的模板，适合新项目起步：
+```bash
+dotnet run --project examples/starter/starter.csproj
+```
+
+更多说明见：
+- [examples/starter/README.md](./examples/starter/README.md)
+
 详细使用指南：
 - [docs/QUICKSTART.md](./docs/QUICKSTART.md) - 5 分钟快速上手
 - [docs/USAGE.md](./docs/USAGE.md) - 完整使用文档
@@ -216,6 +238,8 @@ python3 test_nrepl.py
 │   ├── specter-demo/                   # Specter 示例工程
 │   ├── webservice/                     # HttpListener 示例工程
 │   └── webservice-minimal/             # Minimal API 示例工程
+│   ├── csharp-host/                    # C# Host 示例（cljr + C# 包）
+│   └── starter/                        # 模板化 starter
 ├── packages/
 │   └── specter-clr/                    # Specter CLR 包
 ├── docs/                               # 其他文档

@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -41,6 +42,17 @@ namespace clojureCLR_nrepl
 
                 var harmony = new Harmony("clojureclr.nrepl.rt-default-imports");
                 harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+
+                var tryLoadTarget = rtType.GetMethod(
+                    "TryLoadFromEmbeddedResource",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                var tryLoadPrefix = typeof(RTDefaultImportsPatch).GetMethod(
+                    nameof(TryLoadFromEmbeddedResourcePrefix),
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                if (tryLoadTarget != null && tryLoadPrefix != null)
+                {
+                    harmony.Patch(tryLoadTarget, prefix: new HarmonyMethod(tryLoadPrefix));
+                }
             }
             catch
             {
@@ -62,7 +74,7 @@ namespace clojureCLR_nrepl
             }
 
             dict[Symbol.intern("StringBuilder")] = typeof(StringBuilder);
-            dict[Symbol.intern("BigInteger")] = typeof(clojure.lang.BigInteger);
+            dict[Symbol.intern("BigInteger")] = typeof(global::System.Numerics.BigInteger);
             dict[Symbol.intern("BigDecimal")] = typeof(clojure.lang.BigDecimal);
 
             __result = dict;
@@ -96,6 +108,149 @@ namespace clojureCLR_nrepl
                     }
                 }
             }
+        }
+
+        private static bool TryLoadFromEmbeddedResourcePrefix(string relativePath, string assemblyname, ref bool __result)
+        {
+            if (TryLoadAssemblyResource(relativePath, assemblyname))
+            {
+                __result = true;
+                return false;
+            }
+
+            var dotName = relativePath.Replace("/", ".") + ".cljr";
+            if (TryLoadSourceResource(relativePath, dotName))
+            {
+                __result = true;
+                return false;
+            }
+
+            dotName = relativePath.Replace("/", ".") + ".cljc";
+            if (TryLoadSourceResource(relativePath, dotName))
+            {
+                __result = true;
+                return false;
+            }
+
+            dotName = relativePath.Replace("/", ".") + ".clj";
+            if (TryLoadSourceResource(relativePath, dotName))
+            {
+                __result = true;
+                return false;
+            }
+
+            __result = false;
+            return false;
+        }
+
+        private static bool TryLoadAssemblyResource(string relativePath, string assemblyName)
+        {
+            var stream = GetEmbeddedResourceStreamSafe(assemblyName, out _);
+            if (stream == null) return false;
+
+            using (stream)
+            using (var ms = new MemoryStream())
+            {
+                stream.CopyTo(ms);
+                var bytes = ms.ToArray();
+                var loadAssembly = typeof(Compiler).GetMethod(
+                    "LoadAssembly",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static,
+                    null,
+                    new[] { typeof(byte[]), typeof(string) },
+                    null);
+                if (loadAssembly == null) return false;
+
+                Var.pushThreadBindings(RT.map(
+                    RT.CurrentNSVar, RT.CurrentNSVar.deref(),
+                    RT.WarnOnReflectionVar, RT.WarnOnReflectionVar.deref(),
+                    RT.UncheckedMathVar, RT.UncheckedMathVar.deref()));
+                try
+                {
+                    loadAssembly.Invoke(null, new object[] { bytes, relativePath });
+                }
+                finally
+                {
+                    Var.popThreadBindings();
+                }
+            }
+
+            return true;
+        }
+
+        private static bool TryLoadSourceResource(string relativePath, string resourceName)
+        {
+            var stream = GetEmbeddedResourceStreamSafe(resourceName, out var containingAssembly);
+            if (stream == null) return false;
+
+            using (stream)
+            using (var reader = new StreamReader(stream))
+            {
+                Var.pushThreadBindings(RT.map(
+                    RT.CurrentNSVar, RT.CurrentNSVar.deref(),
+                    RT.WarnOnReflectionVar, RT.WarnOnReflectionVar.deref(),
+                    RT.UncheckedMathVar, RT.UncheckedMathVar.deref()));
+                try
+                {
+                    var compileFilesField = typeof(Compiler).GetField(
+                        "CompileFilesVar",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                    var compileFilesVar = compileFilesField?.GetValue(null) as Var;
+                    var compileFiles = compileFilesVar?.deref();
+                    var compileFlag = compileFiles != null && RT.booleanCast(compileFiles);
+                    var assemblyName = containingAssembly?.FullName ?? typeof(RT).Assembly.FullName ?? "unknown";
+
+                    if (compileFlag)
+                    {
+                        var compile = typeof(RT).GetMethod(
+                            "Compile",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                        if (compile == null) return false;
+                        compile.Invoke(null, new object[] { assemblyName, resourceName, reader, relativePath });
+                    }
+                    else
+                    {
+                        var loadScript = typeof(RT).GetMethod(
+                            "LoadScript",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static,
+                            null,
+                            new[] { typeof(string), typeof(string), typeof(TextReader), typeof(string) },
+                            null);
+                        if (loadScript == null) return false;
+                        loadScript.Invoke(null, new object[] { assemblyName, resourceName, reader, relativePath });
+                    }
+                }
+                finally
+                {
+                    Var.popThreadBindings();
+                }
+            }
+
+            return true;
+        }
+
+        private static Stream GetEmbeddedResourceStreamSafe(string resourceName, out System.Reflection.Assembly containingAssembly)
+        {
+            containingAssembly = null;
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (assembly.IsDynamic) continue;
+                try
+                {
+                    var stream = assembly.GetManifestResourceStream(resourceName);
+                    if (stream != null)
+                    {
+                        containingAssembly = assembly;
+                        return stream;
+                    }
+                }
+                catch
+                {
+                    // ignore and continue
+                }
+            }
+
+            return null;
         }
     }
 }
