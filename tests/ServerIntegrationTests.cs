@@ -29,15 +29,8 @@ namespace clojureCLR_nrepl.Tests
                     ["code"] = "(+ 1 2 3)"
                 });
 
-                var responses = ReadResponses(stream, TimeSpan.FromSeconds(3));
-                var error = responses.Find(r => r.TryGetValue("err", out _));
-                if (error != null && error.TryGetValue("err", out var errText))
-                {
-                    Assert.Contains("clojure.lang.RT", errText?.ToString() ?? "");
-                    Assert.Contains(responses, r => HasDoneStatus(r));
-                    return;
-                }
-
+                var responses = ReadResponses(stream, TimeSpan.FromSeconds(10));
+                Assert.DoesNotContain(responses, r => r.TryGetValue("err", out _));
                 Assert.Contains(responses, r => r.TryGetValue("value", out var v) && v?.ToString() == "6");
                 Assert.Contains(responses, r => HasDoneStatus(r));
             }

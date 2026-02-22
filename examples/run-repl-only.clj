@@ -29,7 +29,7 @@
 
 (defn -main [& _]
   (let [root (repo-root)
-        nrepl-util-file (combine-path root "demo" "nrepl_util.clj")
+        nrepl-util-file (combine-path root "examples" "nrepl_util.clj")
         host (or (Environment/GetEnvironmentVariable "NREPL_HOST") "127.0.0.1")
         port (parse-int (or (Environment/GetEnvironmentVariable "NREPL_PORT") "1667") 1667)]
     (clojure.core/load-file nrepl-util-file)

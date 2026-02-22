@@ -24,6 +24,7 @@
   <ItemGroup>
     <!-- ClojureCLR 核心库 -->
     <PackageReference Include="Clojure" Version="1.12.2" />
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,7 +35,11 @@
   <ItemGroup>
     <Compile Remove="cli/**" />
     <Compile Remove="tests/**" />
-    <Compile Remove="demo/**" />
+    <Compile Remove="examples/**" />
+    <Compile Remove="packages/**" />
+    <Compile Remove="tools/**" />
+    <Compile Remove="**/obj/**" />
+    <Compile Remove="**/bin/**" />
   </ItemGroup>
 
 </Project>

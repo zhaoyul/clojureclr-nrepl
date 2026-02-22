@@ -30,7 +30,7 @@ PACKAGE_ID=clojure.core.async.clrfix VERSION=1.7.701-clrfix2 tools/build_core_as
 
 3. Build Specter package:
 ```
-dotnet pack specter-clr/specter-clr.csproj -c Release -o nupkgs /p:PackageId=com.rpl.specter.clr /p:PackageVersion=1.1.7-clrfix1
+dotnet pack packages/specter-clr/specter-clr.csproj -c Release -o nupkgs /p:PackageId=com.rpl.specter.clr /p:PackageVersion=1.1.7-clrfix1
 ```
 
 Packages will be under `nupkgs/`.

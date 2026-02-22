@@ -28,12 +28,12 @@ dotnet tool install --global Clojure.Main --version 1.12.3-alpha4
 准备依赖与本地构建（一次）：
 ```bash
 dotnet build -c Debug clojureCLR-nrepl.csproj
-dotnet restore demo/clojureclr-demo.csproj
+dotnet restore examples/clojureclr-demo.csproj
 ```
 
 运行：
 ```bash
-clojure -i demo/run-core.clj -e "(demo.run-core/-main)"
+Clojure.Main -i examples/run-core.clj -e "(demo.run-core/-main)"
 ```
 
 可选环境变量：
@@ -42,7 +42,7 @@ clojure -i demo/run-core.clj -e "(demo.run-core/-main)"
 - `NREPL_PORT`（默认 `1667`）
 
 注意：`clojure.core.async.clrfix` 在 CLR 上依赖 `clojure.tools.analyzer.clr`。以上脚本会从本机 NuGet cache 加载两者。
-依赖清单（与 `demo/run-core.clj` 保持一致）：
+依赖清单（与 `examples/run-core.clj` 保持一致）：
 - `clojure.core.async.clrfix` `1.7.701-clrfix2`
 - `clojure.tools.analyzer.clr` `1.3.2`
 - `clojure.tools.analyzer` `1.1.1`
@@ -56,17 +56,17 @@ clojure -i demo/run-core.clj -e "(demo.run-core/-main)"
 使用 Clojure 直接驱动 .NET `HttpListener`，无需 C# Web 框架：
 
 ```bash
-clojure -i demo/run-webservice.clj -e "(demo.run-webservice/-main)"
+Clojure.Main -i examples/run-webservice.clj -e "(demo.run-webservice/-main)"
 ```
 
 默认监听 `http://127.0.0.1:8080/`，可用环境变量覆盖：
 ```bash
-WEB_HOST=127.0.0.1 WEB_PORT=8081 clojure -i demo/run-webservice.clj -e "(demo.run-webservice/-main)"
+WEB_HOST=127.0.0.1 WEB_PORT=8081 Clojure.Main -i examples/run-webservice.clj -e "(demo.run-webservice/-main)"
 ```
 
 可选开启 nREPL（默认关闭）：
 ```bash
-NREPL_ENABLE=1 NREPL_PORT=1667 clojure -i demo/run-webservice.clj -e "(demo.run-webservice/-main)"
+NREPL_ENABLE=1 NREPL_PORT=1667 Clojure.Main -i examples/run-webservice.clj -e "(demo.run-webservice/-main)"
 ```
 
 路由示例：
@@ -78,17 +78,17 @@ NREPL_ENABLE=1 NREPL_PORT=1667 clojure -i demo/run-webservice.clj -e "(demo.run-
 
 准备依赖（一次）：
 ```bash
-dotnet restore demo/specter-demo/specter-demo.csproj
+dotnet restore examples/specter-demo/specter-demo.csproj
 ```
 
 运行：
 ```bash
-clojure -i demo/run-specter.clj -e "(demo.run-specter/-main)"
+Clojure.Main -i examples/run-specter.clj -e "(demo.run-specter/-main)"
 ```
 
 可选开启 nREPL（默认关闭）：
 ```bash
-NREPL_ENABLE=1 NREPL_PORT=1667 clojure -i demo/run-specter.clj -e "(demo.run-specter/-main)"
+NREPL_ENABLE=1 NREPL_PORT=1667 Clojure.Main -i examples/run-specter.clj -e "(demo.run-specter/-main)"
 ```
 
 ### Demo（Clojure-only Minimal API）
@@ -96,17 +96,17 @@ NREPL_ENABLE=1 NREPL_PORT=1667 clojure -i demo/run-specter.clj -e "(demo.run-spe
 使用 ASP.NET Core Minimal API，入口与路由均为 Clojure 代码：
 
 ```bash
-clojure -i demo/run-webservice-minimal.clj -e "(demo.run-webservice-minimal/-main)"
+Clojure.Main -i examples/run-webservice-minimal.clj -e "(demo.run-webservice-minimal/-main)"
 ```
 
 默认使用 `ASPNETCORE_URLS`（若未设置，按 ASP.NET Core 默认值）。例如：
 ```bash
-ASPNETCORE_URLS=http://127.0.0.1:8082 clojure -i demo/run-webservice-minimal.clj -e "(demo.run-webservice-minimal/-main)"
+ASPNETCORE_URLS=http://127.0.0.1:8082 Clojure.Main -i examples/run-webservice-minimal.clj -e "(demo.run-webservice-minimal/-main)"
 ```
 
 可选开启 nREPL（默认关闭）：
 ```bash
-NREPL_ENABLE=1 NREPL_PORT=1667 clojure -i demo/run-webservice-minimal.clj -e "(demo.run-webservice-minimal/-main)"
+NREPL_ENABLE=1 NREPL_PORT=1667 Clojure.Main -i examples/run-webservice-minimal.clj -e "(demo.run-webservice-minimal/-main)"
 ```
 
 路由示例：
@@ -119,12 +119,15 @@ NREPL_ENABLE=1 NREPL_PORT=1667 clojure -i demo/run-webservice-minimal.clj -e "(d
 只启动 nREPL，适合作为所有项目的起点：
 
 ```bash
-clojure -i demo/run-repl-only.clj -e "(demo.run-repl-only/-main)"
+Clojure.Main -i examples/run-repl-only.clj -e "(demo.run-repl-only/-main)"
 ```
 
 详细使用指南：
-- [QUICKSTART.md](./QUICKSTART.md) - 5 分钟快速上手
-- [USAGE.md](./USAGE.md) - 完整使用文档
+- [docs/QUICKSTART.md](./docs/QUICKSTART.md) - 5 分钟快速上手
+- [docs/USAGE.md](./docs/USAGE.md) - 完整使用文档
+
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) - 架构概览
+- [docs/SOLUTION.md](./docs/SOLUTION.md) - 仓库结构与构建
 
 ### 连接客户端
 
@@ -203,13 +206,19 @@ python3 test_nrepl.py
 │   ├── BencodeCodecTests.cs            # 编解码测试
 │   ├── ServerIntegrationTests.cs       # 基本协议测试
 │   └── clojureCLR-nrepl.Tests.csproj   # 测试项目
-├── demo/
+├── examples/
 │   ├── run-core.clj                    # core.async + nREPL demo
 │   ├── run-specter.clj                 # Specter demo
 │   ├── run-webservice.clj              # HttpListener demo
 │   ├── run-webservice-minimal.clj      # Minimal API demo
 │   ├── run-repl-only.clj               # 最简 nREPL 起点
-│   └── nrepl_util.clj                  # nREPL 启停工具
+│   ├── nrepl_util.clj                  # nREPL 启停工具
+│   ├── specter-demo/                   # Specter 示例工程
+│   ├── webservice/                     # HttpListener 示例工程
+│   └── webservice-minimal/             # Minimal API 示例工程
+├── packages/
+│   └── specter-clr/                    # Specter CLR 包
+├── docs/                               # 其他文档
 ├── clojureCLR-nrepl.csproj             # 库项目（NuGet 包）
 ├── test_nrepl.py                       # Python 测试脚本
 └── README.md                           # 本文档

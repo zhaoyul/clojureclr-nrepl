@@ -16,7 +16,7 @@ M-x cider-connect-clj  # 127.0.0.1:1667
 
 ```bash
 dotnet tool install --global Clojure.Main --version 1.12.3-alpha4
-clojure.main -i demo/run-repl-only.clj -e "(demo.run-repl-only/-main)"
+Clojure.Main -i examples/run-repl-only.clj -e "(demo.run-repl-only/-main)"
 ```
 
 ## 2. 嵌入 .NET 应用

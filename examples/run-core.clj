@@ -58,8 +58,8 @@
 (defn -main [& _]
   (try
     (let [root (repo-root)
-          nrepl-util-file (combine-path root "demo" "nrepl_util.clj")
-          core-file (combine-path root "demo" "src" "demo" "core.clj")]
+          nrepl-util-file (combine-path root "examples" "nrepl_util.clj")
+          core-file (combine-path root "examples" "src" "demo" "core.clj")]
       (clojure.core/load-file nrepl-util-file)
       (require 'demo.nrepl-util)
       (let [start-nrepl (ns-resolve 'demo.nrepl-util 'start-nrepl!)
@@ -78,9 +78,9 @@
         (load-package-assembly! "clojure.tools.analyzer.clr" "1.3.2" "clojure.tools.analyzer.clr.dll")
         (load-package-assembly! "clojure.core.async.clrfix" "1.7.701-clrfix2" "clojure.core.async.dll")
 
-      ;; Load demo code
-      (clojure.core/load-file core-file)
-      (require 'demo.core)
+        ;; Load demo code
+        (clojure.core/load-file core-file)
+        (require 'demo.core)
 
         (when (nrepl-enabled? true)
           (let [host (or (Environment/GetEnvironmentVariable "NREPL_HOST") "127.0.0.1")
@@ -93,14 +93,14 @@
             (println "  Calva: Connect to Running nREPL Server")
             (println "  CIDER: cider-connect-clj")))
 
-      (let [run-var (ns-resolve 'demo.core 'run)]
-        (when (nil? run-var)
-          (throw (ex-info "Cannot resolve demo.core/run" {})))
-        (println (str "demo.core/run => " (run-var))))
-      (println "Press Enter to stop...")
-      (Console/ReadLine)
+        (let [run-var (ns-resolve 'demo.core 'run)]
+          (when (nil? run-var)
+            (throw (ex-info "Cannot resolve demo.core/run" {})))
+          (println (str "demo.core/run => " (run-var))))
+        (println "Press Enter to stop...")
+        (Console/ReadLine)
         (when-let [server @nrepl*]
-          (stop-nrepl server)))))
+          (stop-nrepl server))))
     (catch Exception ex
       (println (str "ERROR: " (.Message ex)))
       (println (.ToString ex)))))

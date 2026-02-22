@@ -1,0 +1,45 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "clojureCLR-nrepl", "clojureCLR-nrepl.csproj", "{11AD3642-AFC4-4BB3-93E8-A71C6294E488}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "clojureCLR-nrepl-cli", "cli\clojureCLR-nrepl-cli.csproj", "{DFEDB9FC-0EFA-4E73-946E-911CD838D723}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "clojureCLR-nrepl.Tests", "tests\clojureCLR-nrepl.Tests.csproj", "{2FF42806-B62A-45B4-86BB-B5349A6DB97C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "packages", "packages", "{1EEA5434-A525-44CD-8A29-94F47669C769}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "specter-clr", "packages\specter-clr\specter-clr.csproj", "{FFDFA05E-6053-4199-90B0-845CA5BC9006}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{11AD3642-AFC4-4BB3-93E8-A71C6294E488}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{11AD3642-AFC4-4BB3-93E8-A71C6294E488}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{11AD3642-AFC4-4BB3-93E8-A71C6294E488}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{11AD3642-AFC4-4BB3-93E8-A71C6294E488}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DFEDB9FC-0EFA-4E73-946E-911CD838D723}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DFEDB9FC-0EFA-4E73-946E-911CD838D723}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DFEDB9FC-0EFA-4E73-946E-911CD838D723}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DFEDB9FC-0EFA-4E73-946E-911CD838D723}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2FF42806-B62A-45B4-86BB-B5349A6DB97C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2FF42806-B62A-45B4-86BB-B5349A6DB97C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2FF42806-B62A-45B4-86BB-B5349A6DB97C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2FF42806-B62A-45B4-86BB-B5349A6DB97C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FFDFA05E-6053-4199-90B0-845CA5BC9006}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FFDFA05E-6053-4199-90B0-845CA5BC9006}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FFDFA05E-6053-4199-90B0-845CA5BC9006}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FFDFA05E-6053-4199-90B0-845CA5BC9006}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{FFDFA05E-6053-4199-90B0-845CA5BC9006} = {1EEA5434-A525-44CD-8A29-94F47669C769}
+	EndGlobalSection
+EndGlobal

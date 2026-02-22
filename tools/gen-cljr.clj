@@ -114,8 +114,8 @@
 
 (def files
   (->> (concat
-         ["specter-clr/src/clj/com/rpl/specter.cljc"]
-         (sort (map str (file-seq (io/file "specter-clr/src/clj/com/rpl/specter")))) )
+         ["packages/specter-clr/src/clj/com/rpl/specter.cljc"]
+         (sort (map str (file-seq (io/file "packages/specter-clr/src/clj/com/rpl/specter")))) )
        (filter #(.endsWith ^String % ".cljc"))))
 
 (doseq [f files]
