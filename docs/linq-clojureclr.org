@@ -1,4 +1,4 @@
-#+TITLE: Linq编程指南（ClojureCLR 版）
+#+TITLE: Linq编程指南(ClojureCLR 版)
 #+AUTHOR: Kevin'
 #+LANGUAGE: zh-CN
 #+OPTIONS: toc:t
@@ -14,45 +14,45 @@
 
 [[/img/dotnet/002.jpg]]
 
-`Language Integrated Query (Linq)` 是 C# 语言集成的数据查询技术，广泛用于结构化数据（XML, SQL, JSON 等）的处理。
+~Language Integrated Query (Linq)~ 是 C# 语言集成的数据查询技术, 广泛用于结构化数据(XML, SQL, JSON 等)的处理.
 
-本文所有示例均使用 **ClojureCLR** 调用 `.NET LINQ`（`System.Linq.Enumerable`），并按 org-mode 组织。
-形式上 **第一段是代码，第二段是代码执行结果**，可在 ClojureCLR REPL 或脚本中逐段执行。
+本文所有示例均使用 *ClojureCLR* 调用 ~.NET LINQ~(~System.Linq.Enumerable~), 并按 org-mode 组织.
+形式上 *第一段是代码, 第二段是代码执行结果*, 可在 ClojureCLR REPL 或脚本中逐段执行.
 
-* 基础准备（一次即可）
+* 基础准备(一次即可)
 
 #+BEGIN_SRC clojure :exports none
-(ns linq.guide
-  (:import [System Type]
-           [System.Linq Enumerable]
-           [System.Xml.Linq XElement]))
+  (ns linq.guide
+    (:import [System Type]
+             [System.Linq Enumerable]
+             [System.Xml.Linq XElement]))
 
-(def ^Type func2-type (Type/GetType "System.Func`2"))
-(def ^Type func3-type (Type/GetType "System.Func`3"))
+  (def ^Type func2-type (Type/GetType "System.Func`2"))
+  (def ^Type func3-type (Type/GetType "System.Func`3"))
 
-(defn func2
-  "创建 Func<T1,T2> 委托。"
-  [^Type t1 ^Type t2 f]
-  (let [delegate-type (.MakeGenericType func2-type (into-array Type [t1 t2]))]
-    (clojure.lang.Runtime.Converter/ConvertToDelegate f delegate-type)))
+  (defn func2
+    "创建 Func<T1,T2> 委托. "
+    [^Type t1 ^Type t2 f]
+    (let [delegate-type (.MakeGenericType func2-type (into-array Type [t1 t2]))]
+      (clojure.lang.Runtime.Converter/ConvertToDelegate f delegate-type)))
 
-(defn func3
-  "创建 Func<T1,T2,T3> 委托。"
-  [^Type t1 ^Type t2 ^Type t3 f]
-  (let [delegate-type (.MakeGenericType func3-type (into-array Type [t1 t2 t3]))]
-    (clojure.lang.Runtime.Converter/ConvertToDelegate f delegate-type)))
+  (defn func3
+    "创建 Func<T1,T2,T3> 委托. "
+    [^Type t1 ^Type t2 ^Type t3 f]
+    (let [delegate-type (.MakeGenericType func3-type (into-array Type [t1 t2 t3]))]
+      (clojure.lang.Runtime.Converter/ConvertToDelegate f delegate-type)))
 
-(defn invoke-generic
-  "调用 Enumerable 的泛型方法。type-args 为 System.Type 列表。"
-  [^String method-name type-args args]
-  (let [methods (.GetMethods Enumerable)
-        matches (filter #(= method-name (.Name ^System.Reflection.MethodInfo %)) methods)
-        method (first (filter #(.IsGenericMethodDefinition ^System.Reflection.MethodInfo %) matches))
-        m (.MakeGenericMethod ^System.Reflection.MethodInfo method (into-array Type type-args))]
-    (.Invoke m nil (object-array args))))
+  (defn invoke-generic
+    "调用 Enumerable 的泛型方法. type-args 为 System.Type 列表. "
+    [^String method-name type-args args]
+    (let [methods (.GetMethods Enumerable)
+          matches (filter #(= method-name (.Name ^System.Reflection.MethodInfo %)) methods)
+          method (first (filter #(.IsGenericMethodDefinition ^System.Reflection.MethodInfo %) matches))
+          m (.MakeGenericMethod ^System.Reflection.MethodInfo method (into-array Type type-args))]
+      (.Invoke m nil (object-array args))))
 
-(defn print-seq [xs]
-  (doseq [x xs] (println x)))
+  (defn print-seq [xs]
+    (doseq [x xs] (println x)))
 #+END_SRC
 
 * 第一章 Linq 基础介绍
@@ -61,25 +61,25 @@
 
 1. 比命令式风格更简洁
 2. 更清晰地表达意图
-3. 适用于多种数据源（本地对象、数据库、XML、JSON 等）
-4. 组合式构建，逐步拼装查询
+3. 适用于多种数据源(本地对象, 数据库, XML, JSON 等)
+4. 组合式构建, 逐步拼装查询
 5. 类型检查帮助构建安全查询
 
 ** Linq 的组成元素
 
 - 元素
 - 序列
-  - `IEnumerable<T>`：本地查询
-  - `IQueryable<T>`：解释型（远程）查询
-- 查询结果：可以是 value、元素或新序列
+  - ~IEnumerable<T>~: 本地查询
+  - ~IQueryable<T>~: 解释型(远程)查询
+- 查询结果: 可以是 value, 元素或新序列
 
 #+BEGIN_SRC clojure
-(let [fibonacci (into-array System.Int32 [0 1 1 2 3 5])
-      number-of-elements (Enumerable/Count fibonacci)
-      distinct (Enumerable/Distinct fibonacci)]
-  (println (format "元素总数: %d" number-of-elements))
-  (println "处理得到的序列的元素:")
-  (doseq [n distinct] (println n)))
+  (let [fibonacci (into-array System.Int32 [0 1 1 2 3 5])
+        number-of-elements (Enumerable/Count fibonacci)
+        distinct (Enumerable/Distinct fibonacci)]
+    (println (format "元素总数: %d" number-of-elements))
+    (println "处理得到的序列的元素:")
+    (doseq [n distinct] (println n)))
 #+END_SRC
 
 #+RESULTS:
@@ -95,7 +95,7 @@
 
 ** Linq 是 Lazy 的
 
-以下示例中，查询表达式已创建，但未执行；修改原始数组后才会体现在结果里。
+以下示例中, 查询表达式已创建, 但未执行; 修改原始数组后才会体现在结果里.
 
 #+BEGIN_SRC clojure
 (let [fibonacci (int-array [0 1 1 2 3 5])
@@ -112,7 +112,7 @@
 5
 #+end_example
 
-使用 `ToArray` 强制求值后，结果不再受输入变更影响：
+使用 ~ToArray~ 强制求值后, 结果不再受输入变更影响:
 
 #+BEGIN_SRC clojure
 (let [fibonacci (int-array [0 1 1 2 3 5])
@@ -130,7 +130,7 @@
 
 ** Lambda 表达式在查询中的作用
 
-LINQ 操作符接收 `Func<...>` 作为自定义逻辑，这里我们用 Clojure 函数生成委托。
+LINQ 操作符接收 ~Func<...>~ 作为自定义逻辑, 这里我们用 Clojure 函数生成委托.
 
 #+BEGIN_SRC clojure
 (let [fibonacci (into-array System.Int32 [0 1 1 2 3 5])
@@ -146,8 +146,8 @@ LINQ 操作符接收 `Func<...>` 作为自定义逻辑，这里我们用 Clojure
 
 ** 本地与解释型查询
 
-本地查询基于 `IEnumerable<T>`；解释型查询基于 `IQueryable<T>`。
-下例演示 LINQ to XML 的本地查询：
+本地查询基于 ~IEnumerable<T>~; 解释型查询基于 ~IQueryable<T>~.
+下例演示 LINQ to XML 的本地查询:
 
 #+BEGIN_SRC clojure
 (let [xml "<ingredients>
@@ -171,7 +171,7 @@ quantity="200"
 
 * 第二章 两种风格的 Linq
 
-** 传统风格（Fluent style）
+** 传统风格(Fluent style)
 
 #+BEGIN_SRC clojure
 (defrecord Ingredient [Name Calories])
@@ -198,9 +198,9 @@ Milk
 Sugar
 #+end_example
 
-** 查询表达式风格（Clojure 对照）
+** 查询表达式风格(Clojure 对照)
 
-Clojure 没有 C# query syntax，但 `for` 可表达类似语义：
+Clojure 没有 C# query syntax, 但 ~for~ 可表达类似语义:
 
 #+BEGIN_SRC clojure
 (defrecord Ingredient [Name Calories])
@@ -247,7 +247,7 @@ Sugar
 #linq.guide.Ingredient{:Name "Butter", :Calories 200}
 #+end_example
 
-** into（等价思路）
+** into(等价思路)
 
 #+BEGIN_SRC clojure
 (defrecord Ingredient [Name Calories])
@@ -382,7 +382,7 @@ Butter
 
 * 第三章 操作符
 
-** 过滤（Where）
+** 过滤(Where)
 
 #+BEGIN_SRC clojure
 (defrecord Ingredient [Name Calories])
@@ -407,7 +407,7 @@ Butter
 黄油
 #+end_example
 
-** 映射（Select / SelectMany）
+** 映射(Select / SelectMany)
 
 #+BEGIN_SRC clojure
 (defrecord Ingredient [Name Calories])
@@ -468,7 +468,7 @@ Butter
 黄油
 #+end_example
 
-** 分段（Take / Skip / TakeWhile / SkipWhile）
+** 分段(Take / Skip / TakeWhile / SkipWhile)
 
 #+BEGIN_SRC clojure
 (let [ingredients (into-array System.String ["糖" "鸡蛋" "牛奶" "面粉" "黄油"])
@@ -552,7 +552,7 @@ Butter
 #linq.guide.Ingredient{:Name "燕麦", :Calories 50}
 #+end_example
 
-** 顺序（OrderBy / ThenBy / Reverse）
+** 顺序(OrderBy / ThenBy / Reverse)
 
 #+BEGIN_SRC clojure
 (defrecord Ingredient [Name Calories])
@@ -611,7 +611,7 @@ Butter
 #linq.guide.Ingredient{:Name "黄油", :Calories 500}
 #+end_example
 
-** 分组（GroupBy）
+** 分组(GroupBy)
 
 #+BEGIN_SRC clojure
 (defrecord Ingredient [Name Calories])
@@ -645,7 +645,7 @@ Butter
 - 燕麦
 #+end_example
 
-** 集合操作（Concat / Union / Intersect / Except）
+** 集合操作(Concat / Union / Intersect / Except)
 
 #+BEGIN_SRC clojure
 (let [apple (into-array System.String ["Apple" "Sugar" "Pastry" "Cinnamon"])
@@ -679,7 +679,7 @@ Sugar
 Pastry
 #+end_example
 
-** 类型转换（OfType / ToArray / ToList）
+** 类型转换(OfType / ToArray / ToList)
 
 #+BEGIN_SRC clojure
 (let [input (object-array ["Apple" 33 "Sugar" 44 \a (System.DateTime.)])
@@ -693,7 +693,7 @@ Apple
 Sugar
 #+end_example
 
-** 元素操作（First / Last / Single / ElementAt）
+** 元素操作(First / Last / Single / ElementAt)
 
 #+BEGIN_SRC clojure
 (defrecord Ingredient [Name Calories])
@@ -715,7 +715,7 @@ Sugar
 #linq.guide.Ingredient{:Name "糖", :Calories 500}
 #+end_example
 
-** 生成（Empty / Range / Repeat）
+** 生成(Empty / Range / Repeat)
 
 #+BEGIN_SRC clojure
 (let [empty (invoke-generic "Empty" [System.Int32] [])]
@@ -742,7 +742,7 @@ Sugar
 10
 #+end_example
 
-** 统计（Count / Sum / Min / Max / Average / Aggregate）
+** 统计(Count / Sum / Min / Max / Average / Aggregate)
 
 #+BEGIN_SRC clojure
 (let [nums (into-array System.Int32 [1 2 3])]
@@ -766,7 +766,7 @@ Sugar
 6
 #+end_example
 
-** 连接（Zip）
+** 连接(Zip)
 
 #+BEGIN_SRC clojure
 (defrecord Ingredient [Name Calories])
@@ -789,5 +789,5 @@ Sugar has 500 calories
 
 * 结语
 
-以上示例展示了如何在 **ClojureCLR** 中调用 `System.Linq.Enumerable` 来使用 LINQ。
-如需补充更多操作符（`Queryable`、PLINQ 等），可继续追加章节。
+以上示例展示了如何在 *ClojureCLR* 中调用 ~System.Linq.Enumerable~ 来使用 LINQ.
+如需补充更多操作符(~Queryable~, PLINQ 等), 可继续追加章节.
