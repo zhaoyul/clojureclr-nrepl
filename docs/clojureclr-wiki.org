@@ -519,6 +519,9 @@ ClojureCLR 通过垂直线引用机制扩展了符号的读取器语法，用于
 ** 自动类型推断
 
 ClojureCLR 支持泛型方法的自动类型推断。
+`Where` 这类方法有多个重载时，ClojureCLR 会根据参数实参的形状选择最合适签名。
+例如 `Enumerable/Where` 同时支持 `(Func<TSource, bool>)` 和 `(Func<TSource, int, bool>)` 两种重载，
+`even?` 这类一元函数会优先匹配前者；一旦参数形状不能唯一确定，就会报 `Multiple targets could match`。
 
 #+BEGIN_SRC clojure
   ;; 导入 System.Linq
@@ -529,6 +532,7 @@ ClojureCLR 支持泛型方法的自动类型推断。
   (def numbers [1 2 3 4 5 6 7 8 9 10])
   (def evens (Enumerable/Where numbers even?))
   (seq evens)
+
   ;; => (2 4 6 8 10)
 
   ;; 使用 Select 进行映射
@@ -548,6 +552,17 @@ ClojureCLR 支持泛型方法的自动类型推断。
       seq
       )
   ;; => (4)
+#+END_SRC
+
+** Distinct 需要显式类型参数的情况
+
+`Distinct` 在 ClojureCLR 中有时会因为泛型类型推断不足而出现编译错误。
+这类错误通常与 `(0:0)` 或无法确定候选重载有关，建议显式给出 TSource：
+
+#+BEGIN_SRC clojure
+(def distinct-nums (Enumerable/Distinct (type-args Int32) numbers))
+(seq distinct-nums)
+;; => (1 2 3 4 5 6 7 8 9 10)
 #+END_SRC
 
 ** 处理歧义重载

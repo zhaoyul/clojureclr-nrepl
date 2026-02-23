@@ -16,7 +16,7 @@
 
 ~Language Integrated Query (Linq)~ 是 C# 语言集成的数据查询技术, 广泛用于结构化数据(XML, SQL, JSON 等)的处理.
 
-本文所有示例均使用 *ClojureCLR* 调用 ~.NET LINQ~(~System.Linq.Enumerable~), 并按 org-mode 组织.
+本文所有示例均使用 *ClojureCLR* 调用 ~.NET LINQ~ (~System.Linq.Enumerable~), 并按 org-mode 组织.
 形式上 *第一段是代码, 第二段是代码执行结果*, 可在 ClojureCLR REPL 或脚本中逐段执行.
 
 * 基础准备(一次即可)
@@ -74,12 +74,18 @@
 - 查询结果: 可以是 value, 元素或新序列
 
 #+BEGIN_SRC clojure
-  (let [fibonacci (into-array System.Int32 [0 1 1 2 3 5])
-        number-of-elements (Enumerable/Count fibonacci)
+  (let [fibonacci [0 1 1 2 3 5]
+        number-of-elements (count fibonacci)
         distinct (Enumerable/Distinct fibonacci)]
     (println (format "元素总数: %d" number-of-elements))
     (println "处理得到的序列的元素:")
     (doseq [n distinct] (println n)))
+
+  (Enumerable/Distincvt [1 2])
+
+
+
+
 #+END_SRC
 
 #+RESULTS:
