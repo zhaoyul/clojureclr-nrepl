@@ -11,10 +11,16 @@ namespace ClojureClrStarter
     {
         private static void Main(string[] args)
         {
-            var repoRoot = FindRepoRoot();
-            var cljPath = Path.Combine(repoRoot, "examples", "starter", "src", "app", "core.clj");
+            var cljPath = ResolveClojureEntryPath();
+            if (string.IsNullOrWhiteSpace(cljPath))
+            {
+                throw new InvalidOperationException(
+                    "Cannot locate app core.clj. " +
+                    "Set CORECLR_STUDIO_CLJ_PATH to an explicit path or keep src/app/core.clj in your project.");
+            }
 
             PreloadClojureAssemblies();
+            BootstrapClojureLoaders(AppContext.BaseDirectory);
 
             NReplServer? server = null;
             var nreplEnabled = IsEnabled("NREPL_ENABLE");
@@ -75,26 +81,33 @@ namespace ClojureClrStarter
             return int.TryParse(raw, out var value) ? value : fallback;
         }
 
-        private static string FindRepoRoot()
+        private static string ResolveClojureEntryPath()
         {
-            var candidates = new[]
+            var explicitPath = Environment.GetEnvironmentVariable("CORECLR_STUDIO_CLJ_PATH");
+            if (!string.IsNullOrWhiteSpace(explicitPath))
             {
-                Directory.GetCurrentDirectory(),
-                AppContext.BaseDirectory
-            };
-
-            foreach (var start in candidates)
-            {
-                var dir = new DirectoryInfo(start);
-                while (dir != null)
-                {
-                    var marker = Path.Combine(dir.FullName, "clojureCLR-nrepl.csproj");
-                    if (File.Exists(marker)) return dir.FullName;
-                    dir = dir.Parent;
-                }
+                var expanded = Environment.ExpandEnvironmentVariables(explicitPath);
+                if (File.Exists(expanded)) return expanded;
             }
 
-            throw new InvalidOperationException("Cannot locate repo root (clojureCLR-nrepl.csproj).");
+            var baseDirectory = AppContext.BaseDirectory;
+            var projectDirectory = Directory.GetCurrentDirectory();
+
+            var candidates = new[]
+            {
+                Path.Combine(projectDirectory, "src", "app", "core.clj"),
+                Path.Combine(projectDirectory, "core.clj"),
+                Path.Combine(baseDirectory, "src", "app", "core.clj"),
+                Path.Combine(baseDirectory, "app", "core.clj"),
+                Path.Combine(baseDirectory, "core.clj")
+            };
+
+            foreach (var path in candidates)
+            {
+                if (File.Exists(path)) return path;
+            }
+
+            return string.Empty;
         }
 
         private static void PreloadClojureAssemblies()
@@ -103,10 +116,35 @@ namespace ClojureClrStarter
             var clj = Path.Combine(baseDir, "Clojure.dll");
             var cljSource = Path.Combine(baseDir, "Clojure.Source.dll");
             var specter = Path.Combine(baseDir, "com.rpl.specter.dll");
+            var async = Path.Combine(baseDir, "clojure.core.async.dll");
+            var analyzer = Path.Combine(baseDir, "clojure.tools.analyzer.dll");
+            var reader = Path.Combine(baseDir, "clojure.tools.reader.dll");
+            var analyzerClr = Path.Combine(baseDir, "clojure.tools.analyzer.clr.dll");
+            var priorityMap = Path.Combine(baseDir, "clojure.data.priority-map.dll");
+            var coreCache = Path.Combine(baseDir, "clojure.core.cache.dll");
+            var coreMemoize = Path.Combine(baseDir, "clojure.core.memoize.dll");
 
             if (File.Exists(clj)) Assembly.LoadFrom(clj);
             if (File.Exists(cljSource)) Assembly.LoadFrom(cljSource);
             if (File.Exists(specter)) Assembly.LoadFrom(specter);
+            if (File.Exists(async)) Assembly.LoadFrom(async);
+            if (File.Exists(analyzer)) Assembly.LoadFrom(analyzer);
+            if (File.Exists(reader)) Assembly.LoadFrom(reader);
+            if (File.Exists(analyzerClr)) Assembly.LoadFrom(analyzerClr);
+            if (File.Exists(priorityMap)) Assembly.LoadFrom(priorityMap);
+            if (File.Exists(coreCache)) Assembly.LoadFrom(coreCache);
+            if (File.Exists(coreMemoize)) Assembly.LoadFrom(coreMemoize);
+        }
+
+        private static void BootstrapClojureLoaders(string baseDir)
+        {
+            var escaped = baseDir.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            var script = @$"(doseq [a [""clojure.tools.analyzer.dll"" ""clojure.tools.reader.dll"" ""clojure.data.priority-map.dll"" ""clojure.core.cache.dll"" ""clojure.core.memoize.dll"" ""clojure.tools.analyzer.clr.dll"" ""clojure.core.async.dll""]]
+  (let [path (System.IO.Path/Combine ""{escaped}"" a)]
+    (when (System.IO.File/Exists path)
+      (assembly-load-file path))))";
+
+            RT.var("clojure.core", "load-string").invoke(script);
         }
     }
 }

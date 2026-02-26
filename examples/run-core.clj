@@ -37,10 +37,20 @@
 (defn- combine-path [& parts]
   (reduce (fn [a b] (Path/Combine a b)) (first parts) (rest parts)))
 
-(defn- load-package-assembly! [package-id version assembly-name]
-  (let [root (nuget-root)
-        path (combine-path root package-id version "lib" "netstandard2.0" assembly-name)]
-    (load-assembly! path)))
+(defn- load-package-assembly!
+  ([package-id version assembly-name]
+   (load-package-assembly! package-id version assembly-name ["net8.0" "net7.0" "net6.0" "netstandard2.0"]))
+  ([package-id version assembly-name candidates]
+   (let [root (nuget-root)
+         pkg-path (combine-path root (str/lower-case package-id) version)]
+     (loop [paths (map #(combine-path pkg-path "lib" % assembly-name) candidates)]
+       (when-not (seq paths)
+         (throw (ex-info (str "Could not resolve package assembly: " package-id "/" version "/" assembly-name)
+                         {:package package-id :version version :candidates candidates})))
+       (let [path (first paths)]
+         (if (.Exists (FileInfo. path))
+           (load-assembly! path)
+           (recur (rest paths))))))))
 
 (defn- nrepl-enabled? [default-on?]
   (let [raw (Environment/GetEnvironmentVariable "NREPL_ENABLE")]
@@ -68,6 +78,10 @@
           (throw (ex-info "Cannot resolve demo.nrepl-util/start-nrepl!" {})))
         (when (nil? stop-nrepl)
           (throw (ex-info "Cannot resolve demo.nrepl-util/stop-nrepl!" {})))
+
+        ;; Load 0Harmony explicitly when nREPL is used
+        (when (nrepl-enabled? true)
+          (load-package-assembly! "Lib.Harmony" "2.4.2" "0Harmony.dll"))
 
         ;; Load NuGet assemblies for core.async and its analyzer dependency
         (load-package-assembly! "clojure.tools.analyzer" "1.1.1" "clojure.tools.analyzer.dll")

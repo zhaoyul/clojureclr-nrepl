@@ -7,12 +7,21 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!--<PackageReference Include="ClojureCLR.NRepl" Version="0.1.0" />-->
+    <PackageReference Include="ClojureCLR.NRepl" Version="0.1.0" />
+    <PackageReference Include="clojure.core.async.clrfix" Version="1.7.701-clrfix2" />
     <PackageReference Include="com.rpl.specter.clr" Version="1.1.7-clrfix1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
+  <!-- 本地调试用, 替换直接的 ClojureCLR.NRepl 依赖
   <ItemGroup>
     <ProjectReference Include="..\\..\\clojureCLR-nrepl.csproj" />
+  </ItemGroup>-->
+
+  <ItemGroup>
+    <None Include="src\\app\\core.clj">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
   </ItemGroup>
 </Project>
