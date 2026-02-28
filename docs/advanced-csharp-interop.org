@@ -1,0 +1,615 @@
+#+TITLE: ClojureCLR 与 C# 深度互操作与高级系统编程架构解析
+#+AUTHOR: ClojureCLR 实战小组
+#+OPTIONS: toc:2
+#+OPTIONS: num:2
+#+DESCRIPTION: 深入 ClojureCLR 与 C# 互操作的架构, 性能, 并发与 AOT 体系化文档
+
+* 引言
+
+本文面向高阶开发场景, 聚焦 ClojureCLR 与 C# 深度集成时的工程决策, 而非 API 级语法说明.
+目标是在同一套 .NET 生态里, 把 Clojure 的不可变模型与 C# 的强类型系统, 对象模型和运行时能力结合为可演进的企业架构方案.
+
+** 适用范围
+
+- 已能稳定运行 ClojureCLR 的项目.
+- 需要在 .NET 中混合使用 Clojure 与 C#(含接口, 泛型, 异步, P/Invoke, AOT 等).
+- 关注性能与启动时延, 尤其是微服务与云原生部署.
+
+* 1. 架构哲学与底层运行时同构性分析
+
+ClojureCLR 的价值并非" 把 Clojure 语法搬到 CLR" , 而是把 Lisp 式数据中心架构接入 CLR 的对象世界.
+
+** 1.1 动态数据驱动与 CLR 强类型系统的碰撞
+
+Clojure 偏好用异构 Map/Vector/Set 进行系统建模, 强调 *数据而非类型层级*.
+CLR 则通过 *具现化泛型(reified generics)* 持有完整类型实参, 参与重载解析与运行时内存布局.
+
+实践含义:
+
+- Clojure 侧动态建模可以提升边界处理和外部适配能力.
+- 一旦跨到 C# 泛型 API, 必须显式提供类型语义, 避免反射退化.
+
+** 1.2 限定方法(Qualified Methods)与高阶互操作
+
+现代 ClojureCLR(>=1.12)支持方法值语义:
+
+- =Classname/method= => 静态方法
+- =Classname/.method= => 实例方法
+- =Classname/new= => 构造
+
+示例:
+
+#+BEGIN_SRC clojure
+  ;; 直接把 C# 静态/实例方法当作函数来处理
+  (map String/.ToUpper ["abc" "def" "ghi"])
+#+END_SRC
+
+#+RESULTS:
+
+在高频路径优先避免匿名闭包包装.
+当方法重载无法自动推断时, 需要配合显式参数类型提示或元数据约束, 以便编译期绑定到特定重载.
+
+#+BEGIN_SRC clojure
+  (import '[System.Linq Enumerable])
+
+  ;; 静态方法值
+  (map String/.ToUpper ["abc" "def"])
+  ;; => ("ABC" "DEF")
+
+  ;; 实例方法值
+  (let [sb (System.Text.StringBuilder.)]
+    (.AppendLine sb "x")
+    (str sb))
+
+  ;; 带类型提示解决重载歧义(示例, 按目标方法版本约束)
+  (defn sum-int-or-long [^long a ^long b] (+ a b))
+
+  (sum-int-or-long 100 200)
+  ;; => 300
+
+  (let [arr (int-array [1 2 3])]
+    (Enumerable/ToDictionary
+     arr
+     #(System.Int32/ToString ^int %)))
+#+END_SRC
+
+C# 中如果接口暴露重载签名, 建议显式包装到专用桥接函数再供 Clojure 调用:
+
+#+BEGIN_SRC csharp
+public static class Bridge
+{
+    public static string ToUpperOrdinal(string value) => value.ToUpperInvariant();
+}
+#+END_SRC
+
+* 2. 内存布局, 结构体编组与非托管互操作
+
+这部分是企业级稳定性核心: 一旦跨 P/Invoke, 内存布局错误会直接导致崩溃.
+
+** 2.1 结构体(Struct)布局控制
+
+在 C# 中使用 =StructLayoutAttribute= 控制互操作布局.
+
+#+BEGIN_SRC csharp
+[StructLayout(LayoutKind.Sequential)]
+public struct PacketHeader
+{
+    public uint Type;
+    public int Length;
+    public long Timestamp;
+}
+
+[StructLayout(LayoutKind.Explicit)]
+public struct ProtoUnion
+{
+    [FieldOffset(0)] public int I;
+    [FieldOffset(0)] public float F;
+}
+#+END_SRC
+
+- =Sequential=: 按字段顺序 + 默认对齐, 最常用.
+- =Explicit=: 联合体 / 特殊二进制协议字段映射场景使用.
+- =Auto=: 通常不用于 P/Invoke.
+
+** 2.2 布尔封送与布尔语义
+
+跨平台布尔尺寸差异是高频坑点(Windows BOOL=4, C++ bool=1, VARIANT_BOOL=2).
+需要时使用 =MarshalAs= 明确声明.
+
+#+BEGIN_SRC csharp
+[DllImport("native.dll", CallingConvention = CallingConvention.Cdecl)]
+static extern int IsValid(
+    [MarshalAs(UnmanagedType.I1)] byte flag); // 需时改为 I1/I4/Bool 或 VARIANT_BOOL
+#+END_SRC
+
+#+BEGIN_SRC csharp
+[StructLayout(LayoutKind.Sequential)]
+public struct NativeArg
+{
+    public int Code;
+    public byte Enabled; // C++ bool
+}
+
+[DllImport("native.dll", CallingConvention = CallingConvention.Cdecl)]
+public static extern int NativeProcess(ref NativeArg arg, out int status);
+
+[DllImport("native.dll", CallingConvention = CallingConvention.Cdecl)]
+public static extern int NativeBool([MarshalAs(UnmanagedType.VariantBool)] bool ok);
+#+END_SRC
+
+** 2.3 ByRef, Out 与非托管内存
+
+- =ref= / =out= 在 IL 层本质都走 byref 指针.
+- 复杂场景优先显式分配非托管内存, 配合 =Marshal= 进行读写.
+
+#+BEGIN_SRC csharp
+var bytes = 128;
+IntPtr p = Marshal.AllocCoTaskMem(bytes);
+try
+{
+    // StructureToPtr / PtrToStructure
+}
+finally
+{
+    Marshal.FreeCoTaskMem(p);
+}
+#+END_SRC
+
+#+BEGIN_SRC clojure
+;; Clojure 调用示例(通过 assembly-load + DllImport 暴露的类型)
+(import 'System.Runtime.InteropServices.Marshal
+        'System.IntPtr)
+
+(def struct-size 16)
+(let [p (Marshal/AllocCoTaskMem struct-size)]
+  (try
+    ;; 假设已在 C# 侧声明了 NativeLib/NativeProcess 入口
+    ;; 返回码处理...
+    (finally
+      (Marshal/FreeCoTaskMem p))))
+#+END_SRC
+
+* 3. 深入面向对象边界: 接口, 抽象类与代理机制
+
+** 3.1 reify / deftype / defrecord 对比
+
+- =defrecord=: 适合领域对象; 具备映射语义与值语义实现.
+- =deftype=: 适合底层构造, 可变字段场景, 生成更" 接近 CLR" 的类.
+- =reify=: 在运行期生成接口实现, 最快速实现接口闭环, 常用于一次性适配.
+
+#+BEGIN_SRC clojure
+;; defrecord: 领域值对象
+(defrecord User [id name role]
+  Object
+  (toString [_] (str "user[" id "]")))
+
+;; deftype: 需要可变字段时
+(deftype Counter [^:volatile-mutable ^long n]
+  Object
+  (toString [_] (str "counter:" n)))
+
+(def c (Counter. 0))
+(set! (.n c) 1)
+
+;; reify: 实现接口
+(def visitor
+  (reify
+    java.util.function.Function
+    (apply [_ x] (str "v:" x))))
+#+END_SRC
+
+** 3.2 受保护构造函数与抽象类
+
+当框架要求继承抽象类且无无参构造函数时, 通常需要 =proxy=.
+其调用成本通常高于 =reify=, 但在" 必须继承类型层次" 时是必要手段.
+
+#+BEGIN_SRC clojure
+;; C# 侧定义:
+;; public abstract class Schema { protected Schema(Builder b) {} ... }
+
+(defn create-schema [builder]
+  (proxy [Schema] [builder]
+    (Accept [visitor]
+      (println "visit from clojure proxy" visitor))))
+#+END_SRC
+
+#+BEGIN_SRC csharp
+public abstract class Schema
+{
+    protected Schema(Builder builder) { }
+    public abstract void Accept(Visitor visitor);
+}
+
+public class Builder { /* ... */ }
+#+END_SRC
+
+** 3.3 泛型接口与委托桥接
+
+泛型接口要避免装箱, 必须明确泛型参数实例类型.
+委托在跨 C# 事件/回调中常用于桥接:
+
+- Clojure 函数 -> C# 委托包装
+- C# 事件处理 -> Clojure 回调
+
+#+BEGIN_SRC clojure
+;; 推荐方式: 显式构造具体委托类型, 再通过 Converter 转换 Clojure 函数
+;; 说明：这里直接走 clojure.lang.Runtime.Converter 的完整限定名.
+(import '[System Type])
+
+(def ^Type predicate-type
+  (.MakeGenericType (Type/GetType "System.Predicate`1")
+                    (into-array Type [System.String])))
+
+(defn to-predicate [f]
+  (clojure.lang.Runtime.Converter/ConvertToDelegate f predicate-type))
+
+;; 示例: 把 clojure 字符串过滤逻辑包装成 Predicate<string>
+(def non-empty? (to-predicate (fn [^String s] (not (clojure.string/blank? s)))))
+#+END_SRC
+
+#+BEGIN_SRC csharp
+// C# 侧接收委托的接口
+Task<int> UseDelegate(Func<long, long> fn, long x)
+{
+    return Task.FromResult((int)fn(x));
+}
+#+END_SRC
+
+** 3.4 泛型静态方法桥接(可复用模式)
+
+泛型静态方法(如许多 LINQ API)在 Clojure 中可通过一次性封装反射解析减少重复反射成本.
+某些运行时版本里, 直接调用扩展方法时(例如 =Enumerable/Distinct=)会出现 =Syntax error compiling fn*= 的现象, 此时建议走反射桥接通道.
+
+#+BEGIN_SRC clojure
+(import '[System Type]
+        '[System.Linq Enumerable])
+
+(defn get-generic-method
+  "按名称查找可用的泛型方法定义. "
+  [^String name]
+  (->> (filter #(= name (.Name ^System.Reflection.MethodInfo %))
+               (.GetMethods Enumerable))
+       (filter #(.IsGenericMethodDefinition ^System.Reflection.MethodInfo %))
+       first))
+
+(defn invoke-enumerable-generic
+  [^String method-name type-args args]
+  (let [mi (get-generic-method method-name)
+        closed-method (.MakeGenericMethod ^System.Reflection.MethodInfo mi
+                                          (into-array Type type-args))]
+    (.Invoke closed-method nil (into-array Object args))))
+
+;; 例: 过滤字符串序列(OfType<T>)
+(let [numbers (int-array [1 2 3 4 5])]
+  (invoke-enumerable-generic "OfType" [System.Int32] [numbers]))
+#+END_SRC
+
+#+BEGIN_SRC clojure
+;; 已验证可运行的底线实现: 通过反射构建委托后调用 ToArray 物化结果
+(import '[System Type]
+        '[System.Linq Enumerable]
+        '[System.Reflection MethodInfo])
+
+(let [mi (first (filter #(and (= "ToArray" (.Name ^MethodInfo %))
+                             (.IsGenericMethodDefinition ^MethodInfo %))
+                       (.GetMethods Enumerable)))
+      closed (.MakeGenericMethod ^MethodInfo mi (into-array System.Type [System.Int32]))
+      result (.Invoke closed nil (object-array [(int-array [1 2 3 4 5])]))]
+  result)
+#+END_SRC
+
+** 3.5 事件回调向通道的桥接
+
+事件风格 API 往往需要把回调转为异步队列, 便于 core.async 流水线统一处理.
+
+#+BEGIN_SRC csharp
+public sealed class MessageBus
+{
+    public event System.Action<string> MessageArrived;
+    public void Publish(string msg) => MessageArrived?.Invoke(msg);
+}
+#+END_SRC
+
+#+BEGIN_SRC clojure
+(ns demo.events
+  (:require [clojure.core.async :as async :refer [chan go put! close!]]))
+
+(import '[System.Action])
+
+(defn subscribe-bus [^MessageBus bus]
+  (let [ch (chan 16)]
+    (let [handler (Action (fn [^String msg]
+                            (put! ch msg)))]
+      ;; 具体事件名应按实际委托签名改写: (.add_MessageArrived bus handler)
+      ; (.add_MessageArrived bus handler)
+      ch)))
+#+END_SRC
+
+* 4. 并发模型的冲突与重构: STM, TPL 与 core.async
+
+** 4.1 语义差异
+
+- Clojure: Refs / Atoms / Agents(强调状态一致性与无锁策略)
+- C#: async/await + TPL(基于状态机的任务调度)
+
+** 4.2 同构视角: go 与 async/await
+
+核心思想一致: 都通过继续传递/挂起机制释放线程.
+差异在于 API 边界:
+
+- C# 常见返回 =System.Threading.Tasks.Task=
+- core.async 使用 Channel(通道)
+
+** 4.3 桥接实践: TaskCompletionSource
+
+在 Clojure 侧用 core.async 逻辑执行异步流转时, 给 C# 返回 Task:
+
+1. 创建 =TaskCompletionSource<T>=
+2. 启动 =go= 或管道逻辑
+3. 成功时 =TrySetResult=
+4. 失败时 =TrySetException=
+5. 返回 =Task= 给调用方
+
+这样可保持双方调度器不阻塞.
+
+#+BEGIN_SRC clojure
+(ns demo.async-bridge
+  (:require [clojure.core.async :as async :refer [go chan <! >! >!! timeout alt!]]
+            [clojure.string :as str])
+  (:import [System.Threading.Tasks TaskCompletionSource])
+  (:import [System.Threading.Tasks Task Task]))
+
+(defn process-async [inputs]
+  (let [tcs (TaskBridge/NewBoolTcs)
+        out (chan)]
+    (go
+      (try
+        (<! (timeout 10))
+        (if (empty? inputs)
+          (.TrySetResult ^TaskCompletionSource tcs false)
+          (.TrySetResult ^TaskCompletionSource tcs true))
+      (catch System.Exception ex
+        (.TrySetException ^TaskCompletionSource tcs ex)))
+    (.Task ^TaskCompletionSource tcs)))
+#+END_SRC
+
+#+BEGIN_SRC csharp
+public interface IProcessor
+{
+    System.Threading.Tasks.Task<bool> ProcessAsync(int[] inputs);
+}
+
+// 统一提供一个非泛型入口, 便于 Clojure 调用时直接返回 Task<bool>
+public static class TaskBridge
+{
+    public static TaskCompletionSource<bool> NewBoolTcs() => new TaskCompletionSource<bool>();
+}
+
+// 在 Clojure 调用后返回的就是 Task<bool>, 可直接 await
+var ok = await processor.ProcessAsync(new[] {1,2,3});
+#+END_SRC
+
+** 推荐
+为了在无 UI/无同步上下文下避免死锁, 请让回调/延续保持在线程池调度, 不要在 C# 侧用同步等待:
+
+#+BEGIN_SRC csharp
+// ❌ 不推荐: 可能阻塞上下文
+var r = bridge.ProcessAsync(input).Result;
+
+// ✅ 推荐:
+var r = await bridge.ProcessAsync(input).ConfigureAwait(false);
+#+END_SRC
+
+** 4.4 并发边界: 超时, 取消与任务取消传播
+
+建议把 Clojure 的超时逻辑与 C# 的 `CancellationToken` 做成一一对应映射, 保证调用栈可观测.
+
+#+BEGIN_SRC clojure
+(ns demo.cancel
+  (:require [clojure.core.async :as async :refer [chan go <! timeout]]))
+
+(import '[System.Threading.CancellationTokenSource])
+
+(defn with-timeout-cs-token
+  "返回 token 与回收函数, 适用于调用带 CancellationToken 的 C# 接口. "
+  [^long timeout-ms f]
+  (let [cts (CancellationTokenSource. timeout-ms)
+        token (.get_Token cts)]
+    (try
+      (f token)
+      (finally
+        (.Dispose cts))))
+#+END_SRC
+
+#+BEGIN_SRC csharp
+public interface ILongOp
+{
+    Task<string> RunAsync(CancellationToken token);
+}
+#+END_SRC
+
+** 4.5 异常边界: 在 clojure 捕获 .NET 异常并保留原始上下文
+
+#+BEGIN_SRC clojure
+(ns demo.error-boundary)
+
+(defn safe-invoke [f]
+  (try
+    (f)
+    (catch System.Exception ex
+      {:status :error
+       :type (.GetType ex)
+       :message (.Message ex)
+       :source (.Source ex)
+       :stack (.StackTrace ex)})))
+
+(safe-invoke (fn []
+              (let [arr (int-array [1 2])]
+                (aget arr 10))))
+#+END_SRC
+
+#+BEGIN_SRC csharp
+public sealed class DownstreamException : Exception
+{
+    public DownstreamException(string message, Exception inner) : base(message, inner) { }
+}
+#+END_SRC
+
+** 4.6 诊断友好日志: 把关键调用参数/返回值结构化
+
+#+BEGIN_SRC clojure
+(ns demo.telemetry
+  (:require [clojure.string :as str]))
+
+(defn trace-call [name args]
+  {:op name
+   :args args
+   :ts (System.DateTime/Now)})
+
+(defn call-with-trace [f & args]
+  (let [meta (trace-call "interop.call" args)]
+    (println "trace start" meta)
+    (let [result (apply f args)]
+      (println "trace end" (assoc meta :result result))
+      result)))
+#+END_SRC
+
+* 5. 内存管理与 GC 精细控制
+
+** 5.1 持久化数据结构与代际 GC
+
+Clojure 持久化结构共享路径(PersistentVector trie)天然生成大量短寿对象, 通常匹配 Gen0 回收策略.
+
+** 5.2 代际晋升陷阱
+
+长期持有巨大中间态会从 Gen0 -> Gen2, 甚至 LOH, 导致 Stop-the-world 增加.
+建议使用 =transient -> persistent!= 在局部做" 可变化批处理" .
+
+** 5.3 反射与装箱
+
+反射 + 未提示类型常触发装箱.
+在热路径务必加类型提示, 例如 =^long=, =^double=, 减少包装对象.
+
+#+BEGIN_SRC clojure
+;; 反射路径会触发动态分派
+(defn bad-sum [xs]
+  (reduce + xs)) ; 混合类型路径容易装箱
+
+;; 明确类型提示减少装箱
+(defn good-sum [^longs xs]
+  (reduce (fn[^long acc ^long x]
+            (unchecked-add acc x))
+          0
+          xs))
+#+END_SRC
+
+* 6. 编译器构造: 宏, AST 与 MSIL 元编程
+
+** 6.1 Reflection.Emit 与动态汇编
+
+ClojureCLR 编译管线在运行时通过 AST -> MSIL 发射组装.
+因此理解 IL 指令栈顺序有助于评估性能.
+
+示例(示意):
+
+#+BEGIN_SRC csharp
+il.Emit(OpCodes.Ldarg_0);
+il.Emit(OpCodes.Ldarg_1);
+il.Emit(OpCodes.Add);
+il.Emit(OpCodes.Ret);
+#+END_SRC
+
+** 6.2 MAGIC/纯数据 IL 管线
+
+MAGIC 方案通过纯 Clojure 的 IR(类 EDN)建模 IL.
+优势: 可在编译期做静态窥孔优化并落盘为 DLL, 适合受限 AOT 平台探索.
+
+** 6.3 可复用 C# 类型工厂片段(反射方式)
+
+在高层次互操作场景, 为避免重复的类型解析, 可以先统一封装一组" 小工厂" :
+
+#+BEGIN_SRC clojure
+(ns doc.interop-bootstrap
+  (:import [System Type Activator]))
+
+(defn generic-list-type [^Type t]
+  (.MakeGenericType (Type/GetType "System.Collections.Generic.List`1") (into-array Type [t])))
+
+(defn make-list [^Type t elems]
+  (let [lt (generic-list-type t)
+        l (.CreateInstance Activator lt)]
+    l))
+
+;; 示例: 创建 List<string> 并保留为 object, 可通过反射继续调用 Add/ToArray
+(def string-list (make-list System.String ["a" "b" "c"]))
+#+END_SRC
+
+** 6.4 跨语言 JSON 承载(DTO 化)
+
+实践上推荐定义纯数据 DTO, 并在 C# 侧用 System.Text.Json 做边界序列化.
+
+#+BEGIN_SRC csharp
+public sealed record OrderDto(string Id, decimal Amount, string Currency);
+
+public sealed class OrderService
+{
+    public string Serialize(OrderDto dto) => JsonSerializer.Serialize(dto);
+    public OrderDto Deserialize(string json) => JsonSerializer.Deserialize<OrderDto>(json);
+}
+#+END_SRC
+
+#+BEGIN_SRC clojure
+(ns doc.json-boundary
+  (:require [clojure.data.json :as json]))
+
+(def dto {:Id "ORD-001" :Amount 39.8 :Currency "USD"})
+(def payload (json/write-str dto))
+#+END_SRC
+
+* 7. AOT 演进: 从 .NET Core 限制到 PersistedAssemblyBuilder
+
+** 7.1 历史限制
+
+早期 ClojureCLR 依赖 AssemblyBuilder.Save, 跨平台 .NET Core 生态中长期受阻, 导致大量运行时动态编译与启动开销不可避免.
+
+** 7.2 .NET 9 之后
+
+.NET 9 引入 =PersistedAssemblyBuilder= 后, 动态程序集可持久化到文件, 配合审计工具(如 ILVerify)更适配云原生, 容器化和快速启动场景.
+
+* 8. 现代企业级工程模式
+
+** 8.1 面向对象模式的替代与融合
+
+- 策略模式: 可用 Clojure 高阶函数 + 数据驱动映射替代接口树.
+- 访问者模式: 可用 multimethods 按关键字/特征动态分派.
+
+** 8.2 DDD 与边界分层
+
+建议边界划分:
+
+- C# 层: I/O, 框架整合, 网络, 持久化, 基础设施.
+- ClojureCLR 层: 核心领域规则, 复杂计算, 规则演化快的业务逻辑.
+
+两者通过纯数据(Map/Vector/EDN)或 DTO 契约交互, 减少语言耦合.
+
+* 9. 与本仓库的映射(可执行实现)
+
+以下条目可直接在仓库中落地验证:
+
+- [[file:../examples/starter/README.md][examples/starter]]: 模板化 C# host + cljr / core.async 示例.
+- [[file:clojureclr-wiki.org][clojureclr-wiki.org]]: ClojureCLR 日常互操作速查.
+- nREPL 与补全测试: 以 [[file:USAGE.md][docs/USAGE.md]] 的实践建议为准(含实例成员/eldoc 约束).
+
+** 建议的实施清单
+
+1. 先把接口边界类型化: 最小化反射与装箱.
+2. 对关键异步接口采用 TaskCompletionSource 桥接.
+3. 把跨非托管边界的 struct/Marshal 行为集中建模为专用模块.
+4. 为高频路径补齐类型提示与参数注解.
+5. 在 Starter 或服务端模板中加入启动/并发/内存基线测试.
+6. 如需 .NET 9 部署, 验证 PersistedAssemblyBuilder 编译链可用性.
+
+* 结语
+
+ClojureCLR 与 C# 的价值在于: 既不牺牲 .NET 框架的生产能力, 也不丢失 Clojure 的可重构性与表达力.
+高级开发者关注的不是" 能否调用" , 而是" 如何在语义, 并发和内存模型上保持可证明的正确性与性能" .

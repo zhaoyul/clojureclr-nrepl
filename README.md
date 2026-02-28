@@ -147,6 +147,7 @@ dotnet run --project examples/starter/starter.csproj
 详细使用指南：
 - [docs/QUICKSTART.md](./docs/QUICKSTART.md) - 5 分钟快速上手
 - [docs/USAGE.md](./docs/USAGE.md) - 完整使用文档
+- [docs/advanced-csharp-interop.org](./docs/advanced-csharp-interop.org) - ClojureCLR 与 C# 深度互操作与高级系统编程
 
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) - 架构概览
 - [docs/SOLUTION.md](./docs/SOLUTION.md) - 仓库结构与构建
